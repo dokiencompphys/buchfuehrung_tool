@@ -5,9 +5,51 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Laufzeitdaten (Ablage, Fotos) – gehören nicht ins Repo
-backend/data/
+# --- Persönliche Daten: gehören nie ins Repo ---------------------------------------
 
-# Lokale Einstellungen
+# Ablage (Datenbank + Originalfotos), auch wenn BUCH_DATA_DIR woanders hinzeigt
+backend/data/
+data/
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.sqlite3-journal
+*-wal
+*-shm
+
+# Fotos von Buchführungsseiten, überall im Projekt (Groß-/Kleinschreibung egal)
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[pP][nN][gG]
+*.[hH][eE][iI][cC]
+*.[hH][eE][iI][fF]
+*.[wW][eE][bB][pP]
+*.[gG][iI][fF]
+*.[bB][mM][pP]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[dD][nN][gG]
+# … außer den Symbolen der App
+!app/assets/**
+
+# Exportierte Buchführungen und Tabellen
+*.[xX][lL][sS][xX]
+*.[xX][lL][sS]
+*.[oO][dD][sS]
+*.[cC][sS][vV]
+*.[pP][dD][fF]
+# Sperrdateien von Excel und LibreOffice
+~$*
+.~lock.*#
+
+# --- Lokale Einstellungen ----------------------------------------------------------
 .env
+.env.*
+!.env.example
 .claude/settings.local.json
+
+# Betriebssystem
+.DS_Store
+Thumbs.db
+desktop.ini
