@@ -1,0 +1,13 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Laufzeitdaten (Ablage, Fotos) – gehören nicht ins Repo
+backend/data/
+
+# Lokale Einstellungen
+.env
+.claude/settings.local.json
