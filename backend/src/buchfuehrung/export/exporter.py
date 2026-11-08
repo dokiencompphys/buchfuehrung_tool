@@ -1,8 +1,10 @@
 """Buchungsmonat → Datei (xlsx, ods, csv, pdf).
 
 Öffentliche Schnittstelle: `export_ledger(ledger, fmt, lang) -> ExportFile`.
-Excel- und LibreOffice-Dateien enthalten echte SUMME-Formeln, damit spätere
-Änderungen in der Tabelle automatisch mitgerechnet werden. Ruhetage sind grau.
+Spalten: Datum | Einnahmen | Ausgaben | Saldo | Grund. Über den Tagen steht
+eine Zeile mit dem Anfangssaldo (bzw. Übertrag). Excel- und LibreOffice-Dateien
+enthalten echte Formeln für Saldo und Summen, damit spätere Änderungen in der
+Tabelle mitgerechnet werden. Ruhetage sind grau.
 """
 
 from __future__ import annotations
@@ -17,6 +19,10 @@ from buchfuehrung.domain.ledger import ClosedKind, DayEntry, LedgerMonth
 from buchfuehrung.export.labels import Lang, labels
 
 GREY = "D9D9D9"
+HEADER_KEYS = ("date", "income", "expense", "balance", "reason")
+
+# Zeilenaufbau der Tabellen (1-basiert, wie in Excel)
+TITLE_ROW, HEADER_ROW, OPENING_ROW, FIRST_DAY_ROW = 1, 2, 3, 4
 
 
 class ExportFormat(StrEnum):
@@ -61,16 +67,17 @@ def export_ledger(ledger: LedgerMonth, fmt: ExportFormat, lang: Lang = "de") -> 
 
 def _day_label(entry: DayEntry, lb: dict[str, str]) -> str:
     weekday = lb["weekdays"].split(",")[entry.day.weekday()]
-    return f"{weekday} {entry.day:%d.%m.%Y}"
+    label = f"{weekday} {entry.day:%d.%m.%Y}"
+    if entry.closed is not None and entry.closed.kind == ClosedKind.HOLIDAY:
+        label += f" · {entry.closed.name}"
+    return label
 
 
-def _note(entry: DayEntry, lb: dict[str, str]) -> str:
-    parts = []
-    if entry.closed is not None:
-        parts.append(lb["sunday"] if entry.closed.kind == ClosedKind.SUNDAY else entry.closed.name)
-    if entry.note:
-        parts.append(entry.note)
-    return " · ".join(parts)
+def _opening_label(ledger: LedgerMonth, lb: dict[str, str]) -> str:
+    carry = ledger.carry_over
+    if ledger.opening_balance is None and carry is not None:
+        return lb["carry_over"].format(period=f"{carry.month:02d}/{carry.year}")
+    return lb["opening"]
 
 
 def _title(ledger: LedgerMonth, lb: dict[str, str]) -> str:
@@ -78,8 +85,13 @@ def _title(ledger: LedgerMonth, lb: dict[str, str]) -> str:
 
 
 def _de(value: Decimal) -> str:
-    """Deutsches Zahlenformat: 1.234,50"""
-    return f"{value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    """Deutsches Zahlenformat: 1.234,50 (negativ mit Minus)."""
+    text = f"{abs(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"-{text}" if value < 0 else text
+
+
+def _de_or_empty(value: Decimal | None) -> str:
+    return _de(value) if value is not None else ""
 
 
 # --- Formate --------------------------------------------------------------------------
@@ -92,30 +104,49 @@ def _xlsx(ledger: LedgerMonth, lb: dict[str, str]) -> bytes:
     wb = Workbook()
     ws = wb.active
     ws.title = ledger.period
+    bold = Font(bold=True)
     ws.append([_title(ledger, lb)])
     ws["A1"].font = Font(bold=True, size=14)
-    ws.append([lb["date"], lb["income"], lb["expense"], lb["note"]])
-    for cell in ws[2]:
-        cell.font = Font(bold=True)
+    ws.append([lb[k] for k in HEADER_KEYS])
+    ws.append([_opening_label(ledger, lb), None, None, ledger.totals.opening])
+    for row in ws.iter_rows(min_row=HEADER_ROW, max_row=OPENING_ROW):
+        for cell in row:
+            cell.font = bold
 
     grey = PatternFill("solid", fgColor=GREY)
-    first = 3
     for entry in ledger.entries:
-        ws.append([_day_label(entry, lb), entry.income, entry.expense, _note(entry, lb)])
+        r = ws.max_row + 1
+        ws.append(
+            [
+                _day_label(entry, lb),
+                entry.income,
+                entry.expense,
+                f"=D{r - 1}+B{r}-C{r}",
+                entry.reason or None,
+            ]
+        )
         if entry.closed is not None:
-            for cell in ws[ws.max_row]:
+            for cell in ws[r]:
                 cell.fill = grey
     last = ws.max_row
 
-    ws.append([lb["total"], f"=SUM(B{first}:B{last})", f"=SUM(C{first}:C{last})"])
-    ws.append([lb["balance"], f"=B{last + 1}-C{last + 1}"])
-    for row in ws.iter_rows(min_row=last + 1):
+    total = last + 1
+    ws.append(
+        [
+            lb["total"],
+            f"=SUM(B{FIRST_DAY_ROW}:B{last})",
+            f"=SUM(C{FIRST_DAY_ROW}:C{last})",
+            f"=D{last}",
+        ]
+    )
+    ws.append([lb["result"], f"=B{total}-C{total}"])
+    for row in ws.iter_rows(min_row=total):
         for cell in row:
-            cell.font = Font(bold=True)
-    for row in ws.iter_rows(min_row=first, min_col=2, max_col=3):
+            cell.font = bold
+    for row in ws.iter_rows(min_row=OPENING_ROW, min_col=2, max_col=4):
         for cell in row:
-            cell.number_format = "#,##0.00 €"
-    for col, width in zip("ABCD", (18, 16, 16, 34), strict=True):
+            cell.number_format = "#,##0.00 €;-#,##0.00 €"
+    for col, width in zip("ABCDE", (30, 16, 16, 16, 40), strict=True):
         ws.column_dimensions[col].width = width
 
     buf = io.BytesIO()
@@ -137,62 +168,82 @@ def _ods(ledger: LedgerMonth, lb: dict[str, str]) -> bytes:
     doc.automaticstyles.addElement(grey)
     doc.automaticstyles.addElement(bold)
 
-    def text(value: str, style: Style | None = None) -> TableCell:
-        cell = (
-            TableCell(valuetype="string", stylename=style)
-            if style
-            else TableCell(valuetype="string")
-        )
-        cell.addElement(P(text=value))
-        return cell
+    def cell(
+        *,
+        text: str | None = None,
+        value: Decimal | None = None,
+        formula: str | None = None,
+        style: Style | None = None,
+    ) -> TableCell:
+        kwargs: dict[str, object] = {}
+        if style is not None:
+            kwargs["stylename"] = style
+        if value is not None:
+            kwargs.update(valuetype="float", value=str(value))
+        elif text:
+            kwargs["valuetype"] = "string"
+        if formula is not None:
+            kwargs["formula"] = formula
+        c = TableCell(**kwargs)
+        shown = _de(value) if value is not None else text
+        if shown:
+            c.addElement(P(text=shown))
+        return c
 
-    def number(value: Decimal | None, style: Style | None = None) -> TableCell:
-        if value is None:
-            return TableCell(stylename=style) if style else TableCell()
-        kwargs = {"valuetype": "float", "value": str(value)}
-        cell = TableCell(stylename=style, **kwargs) if style else TableCell(**kwargs)
-        cell.addElement(P(text=_de(value)))
-        return cell
-
-    def formula(expr: str, value: Decimal) -> TableCell:
-        cell = TableCell(valuetype="float", value=str(value), formula=expr, stylename=bold)
-        cell.addElement(P(text=_de(value)))
-        return cell
-
-    table = Table(name=ledger.period)
-    for cells in (
-        [text(_title(ledger, lb), bold)],
-        [text(lb[k], bold) for k in ("date", "income", "expense", "note")],
-    ):
+    def add_row(table: Table, cells: list[TableCell]) -> None:
         row = TableRow()
         for c in cells:
             row.addElement(c)
         table.addElement(row)
 
-    first = 3
-    for entry in ledger.entries:
-        style = grey if entry.closed is not None else None
-        row = TableRow()
-        for cell in (
-            text(_day_label(entry, lb), style),
-            number(entry.income, style),
-            number(entry.expense, style),
-            text(_note(entry, lb), style),
-        ):
-            row.addElement(cell)
-        table.addElement(row)
-    last = first + len(ledger.entries) - 1
     t = ledger.totals
+    table = Table(name=ledger.period)
+    add_row(table, [cell(text=_title(ledger, lb), style=bold)])
+    add_row(table, [cell(text=lb[k], style=bold) for k in HEADER_KEYS])
+    add_row(
+        table,
+        [
+            cell(text=_opening_label(ledger, lb), style=bold),
+            cell(),
+            cell(),
+            cell(value=t.opening, style=bold),
+        ],
+    )
 
-    total_row = TableRow()
-    total_row.addElement(text(lb["total"], bold))
-    total_row.addElement(formula(f"of:=SUM([.B{first}:.B{last}])", t.income))
-    total_row.addElement(formula(f"of:=SUM([.C{first}:.C{last}])", t.expense))
-    table.addElement(total_row)
-    balance_row = TableRow()
-    balance_row.addElement(text(lb["balance"], bold))
-    balance_row.addElement(formula(f"of:=[.B{last + 1}]-[.C{last + 1}]", t.balance))
-    table.addElement(balance_row)
+    for i, (entry, balance) in enumerate(
+        zip(ledger.entries, ledger.running_balances(), strict=True)
+    ):
+        r = FIRST_DAY_ROW + i
+        style = grey if entry.closed is not None else None
+        add_row(
+            table,
+            [
+                cell(text=_day_label(entry, lb), style=style),
+                cell(value=entry.income, style=style),
+                cell(value=entry.expense, style=style),
+                cell(value=balance, formula=f"of:=[.D{r - 1}]+[.B{r}]-[.C{r}]", style=style),
+                cell(text=entry.reason, style=style),
+            ],
+        )
+    last = FIRST_DAY_ROW + len(ledger.entries) - 1
+    total = last + 1
+
+    add_row(
+        table,
+        [
+            cell(text=lb["total"], style=bold),
+            cell(value=t.income, formula=f"of:=SUM([.B{FIRST_DAY_ROW}:.B{last}])", style=bold),
+            cell(value=t.expense, formula=f"of:=SUM([.C{FIRST_DAY_ROW}:.C{last}])", style=bold),
+            cell(value=t.closing, formula=f"of:=[.D{last}]", style=bold),
+        ],
+    )
+    add_row(
+        table,
+        [
+            cell(text=lb["result"], style=bold),
+            cell(value=t.result, formula=f"of:=[.B{total}]-[.C{total}]", style=bold),
+        ],
+    )
 
     doc.spreadsheet.addElement(table)
     buf = io.BytesIO()
@@ -202,21 +253,23 @@ def _ods(ledger: LedgerMonth, lb: dict[str, str]) -> bytes:
 
 def _csv(ledger: LedgerMonth, lb: dict[str, str]) -> bytes:
     """Semikolon + Dezimalkomma + BOM: öffnet sich in deutschem Excel/LibreOffice korrekt."""
+    t = ledger.totals
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";", lineterminator="\r\n")
-    w.writerow([lb["date"], lb["income"], lb["expense"], lb["note"]])
-    for e in ledger.entries:
+    w.writerow([lb[k] for k in HEADER_KEYS])
+    w.writerow([_opening_label(ledger, lb), "", "", _de(t.opening), ""])
+    for e, balance in zip(ledger.entries, ledger.running_balances(), strict=True):
         w.writerow(
             [
                 f"{e.day:%d.%m.%Y}",
-                _de(e.income) if e.income is not None else "",
-                _de(e.expense) if e.expense is not None else "",
-                _note(e, lb),
+                _de_or_empty(e.income),
+                _de_or_empty(e.expense),
+                _de(balance),
+                e.reason,
             ]
         )
-    t = ledger.totals
-    w.writerow([lb["total"], _de(t.income), _de(t.expense), ""])
-    w.writerow([lb["balance"], _de(t.balance), "", ""])
+    w.writerow([lb["total"], _de(t.income), _de(t.expense), _de(t.closing), ""])
+    w.writerow([lb["result"], _de(t.result), "", "", ""])
     return ("﻿" + buf.getvalue()).encode("utf-8")
 
 
@@ -225,8 +278,8 @@ def _pdf(ledger: LedgerMonth, lb: dict[str, str]) -> bytes:
 
     from buchfuehrung.export.fonts import unicode_font_path
 
-    pdf = FPDF(format="A4")
-    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf = FPDF(format="A4", orientation="landscape")
+    pdf.set_auto_page_break(auto=True, margin=10)
     pdf.add_page()
     font_path = unicode_font_path()
     if font_path:
@@ -239,31 +292,34 @@ def _pdf(ledger: LedgerMonth, lb: dict[str, str]) -> bytes:
     def safe(s: str) -> str:
         return s if font_path else s.encode("latin-1", "replace").decode("latin-1")
 
+    widths = (62, 34, 34, 36, 111)
+    t = ledger.totals
+
+    def row(values: tuple[str, ...], *, height: float = 6, fill: bool = False) -> None:
+        for i, (w, value) in enumerate(zip(widths, values, strict=True)):
+            align = "R" if i in (1, 2, 3) else "L"
+            pdf.cell(w, height, safe(value), border=1, fill=fill, align=align)
+        pdf.ln()
+
     pdf.set_font(family, "B", 14)
     pdf.cell(0, 9, safe(_title(ledger, lb)), new_x="LMARGIN", new_y="NEXT")
-    widths = (38, 32, 32, 88)
     pdf.set_font(family, "B", 10)
-    for w, key in zip(widths, ("date", "income", "expense", "note"), strict=True):
-        pdf.cell(w, 7, safe(lb[key]), border=1)
-    pdf.ln()
+    row(tuple(lb[k] for k in HEADER_KEYS), height=7)
+    row((_opening_label(ledger, lb), "", "", _de(t.opening), ""))
     pdf.set_font(family, "", 10)
-    for e in ledger.entries:
-        fill = e.closed is not None
-        pdf.set_fill_color(217, 217, 217)
-        cells = (
-            _day_label(e, lb),
-            _de(e.income) if e.income is not None else "",
-            _de(e.expense) if e.expense is not None else "",
-            _note(e, lb),
+    pdf.set_fill_color(217, 217, 217)
+    for e, balance in zip(ledger.entries, ledger.running_balances(), strict=True):
+        row(
+            (
+                _day_label(e, lb),
+                _de_or_empty(e.income),
+                _de_or_empty(e.expense),
+                _de(balance),
+                e.reason,
+            ),
+            fill=e.closed is not None,
         )
-        for i, (w, value) in enumerate(zip(widths, cells, strict=True)):
-            pdf.cell(w, 6.5, safe(value), border=1, fill=fill, align="R" if i in (1, 2) else "L")
-        pdf.ln()
-    t = ledger.totals
     pdf.set_font(family, "B", 10)
-    pdf.cell(widths[0], 7, safe(lb["total"]), border=1)
-    pdf.cell(widths[1], 7, _de(t.income), border=1, align="R")
-    pdf.cell(widths[2], 7, _de(t.expense), border=1, align="R")
-    pdf.ln()
-    pdf.cell(widths[0] + widths[1] + widths[2], 7, f"{safe(lb['balance'])}: {_de(t.balance)}")
+    row((lb["total"], _de(t.income), _de(t.expense), _de(t.closing), ""), height=7)
+    row((lb["result"], _de(t.result), "", "", ""), height=7)
     return bytes(pdf.output())

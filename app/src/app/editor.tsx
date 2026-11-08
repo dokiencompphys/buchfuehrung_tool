@@ -1,33 +1,44 @@
 import { router, Stack } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Image, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 
 import { ApiError, api } from '@/api/client';
 import type { DayEntry, ExportFormat, LedgerMonth } from '@/api/types';
 import { useDraft } from '@/draft/DraftProvider';
 import { confirm } from '@/lib/confirm';
 import { downloadFile } from '@/lib/download';
-import { formatCents, parseInput, sumCents, toInput } from '@/lib/money';
+import { formatCents, formatEuro, parseInput, runningBalances, sumCents, toCents, toInput } from '@/lib/money';
 import { useSettings } from '@/settings/SettingsProvider';
 import { Body, Button, Card, Notice, Screen, Select, Title } from '@/ui/components';
 import { colors, font, space, touch } from '@/ui/theme';
 
 type Field = 'income' | 'expense';
-type Inputs = Record<string, { income: string; expense: string }>;
+type Row = { income: string; expense: string; reason: string };
+type Rows = Record<string, Row>;
 
 const FORMATS: ExportFormat[] = ['xlsx', 'ods', 'pdf', 'csv'];
+const WIDE = 900; // ab dieser Breite steht der Grund in derselben Zeile
 
-function inputsFrom(ledger: LedgerMonth): Inputs {
+function rowsFrom(ledger: LedgerMonth): Rows {
   return Object.fromEntries(
-    ledger.entries.map((e) => [e.day, { income: toInput(e.income), expense: toInput(e.expense) }]),
+    ledger.entries.map((e) => [
+      e.day,
+      { income: toInput(e.income), expense: toInput(e.expense), reason: e.reason ?? '' },
+    ]),
   );
 }
 
 export default function Editor() {
   const { t, fmt, settings } = useSettings();
   const { draft, setDraft } = useDraft();
+  const { width } = useWindowDimensions();
+  const wide = width >= WIDE;
+
   const [ledger, setLedger] = useState<LedgerMonth | null>(draft?.ledger ?? null);
-  const [inputs, setInputs] = useState<Inputs>(() => (draft ? inputsFrom(draft.ledger) : {}));
+  const [rows, setRows] = useState<Rows>(() => (draft ? rowsFrom(draft.ledger) : {}));
+  // Anfangssaldo: entweder Übertrag aus dem Vormonat oder manuell eingetragen
+  const [openingManual, setOpeningManual] = useState(draft?.ledger.opening_balance != null);
+  const [openingInput, setOpeningInput] = useState(toInput(draft?.ledger.opening_balance ?? null));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<LedgerMonth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,11 +54,11 @@ export default function Editor() {
 
   const parsed = useMemo(() => {
     const result: Record<string, { income: string | null | undefined; expense: string | null | undefined }> = {};
-    for (const [day, v] of Object.entries(inputs)) {
+    for (const [day, v] of Object.entries(rows)) {
       result[day] = { income: parseInput(v.income), expense: parseInput(v.expense) };
     }
     return result;
-  }, [inputs]);
+  }, [rows]);
 
   if (!ledger) {
     return (
@@ -58,15 +69,32 @@ export default function Editor() {
     );
   }
 
-  const values = Object.values(parsed);
-  const hasInvalid = values.some((v) => v.income === undefined || v.expense === undefined);
-  const income = sumCents(values.map((v) => v.income ?? null));
-  const expense = sumCents(values.map((v) => v.expense ?? null));
-  const hasValues = values.some((v) => v.income || v.expense);
+  const carry = ledger.carry_over;
+  const manual = openingManual || carry === null; // ohne Vormonat immer selbst eintragen
+  const openingParsed = manual ? parseInput(openingInput, { allowNegative: true }) : carry?.amount ?? null;
+  const openingCents = toCents(openingParsed ?? null);
+  const days = ledger.entries.map((e) => [parsed[e.day]?.income ?? null, parsed[e.day]?.expense ?? null] as [string | null, string | null]);
+  const balances = runningBalances(openingCents, days);
+  const income = sumCents(days.map((d) => d[0]));
+  const expense = sumCents(days.map((d) => d[1]));
+  const closing = openingCents + income - expense;
 
-  function setField(day: string, field: Field, text: string) {
+  const values = Object.values(parsed);
+  const hasInvalid =
+    values.some((v) => v.income === undefined || v.expense === undefined) || openingParsed === undefined;
+  const hasValues = values.some((v) => v.income || v.expense) || Object.values(rows).some((r) => r.reason);
+  const monthName = (year: number, month: number) => `${t.months[month - 1]} ${year}`;
+
+  function setField(day: string, field: keyof Row, text: string) {
     setSaved(null);
-    setInputs((prev) => ({ ...prev, [day]: { ...prev[day], [field]: text } }));
+    setRows((prev) => ({ ...prev, [day]: { ...prev[day], [field]: text } }));
+  }
+
+  function applyLedger(next: LedgerMonth) {
+    setLedger(next);
+    setRows(rowsFrom(next));
+    setOpeningManual(next.opening_balance !== null);
+    setOpeningInput(toInput(next.opening_balance));
   }
 
   async function changePeriod(year: number, month: number) {
@@ -76,8 +104,7 @@ export default function Editor() {
       if (!ok) return;
     }
     const fresh = await api.blankDraft(year, month, ledger.region);
-    setLedger({ ...fresh, source: ledger.source, photo_id: ledger.photo_id });
-    setInputs(inputsFrom(fresh));
+    applyLedger({ ...fresh, source: ledger.source, photo_id: ledger.photo_id });
     setSaved(null);
   }
 
@@ -89,8 +116,11 @@ export default function Editor() {
       ...e,
       income: parsed[e.day]?.income ?? null,
       expense: parsed[e.day]?.expense ?? null,
+      reason: rows[e.day]?.reason.trim() ?? '',
     }));
-    const next = { ...ledger, entries };
+    // Manuell, aber leer gelassen: beim ersten Monat = 0 (null), sonst ausdrücklich 0,00
+    const opening_balance = manual ? (openingParsed ?? (carry ? '0.00' : null)) : null;
+    const next: LedgerMonth = { ...ledger, entries, opening_balance };
     setSaving(true);
     try {
       if (!draft?.editingExisting && (await api.exists(next.year, next.month))) {
@@ -98,7 +128,7 @@ export default function Editor() {
         if (!ok) return;
       }
       const res = await api.saveMonth(next);
-      setLedger(res.ledger);
+      applyLedger(res.ledger);
       setSaved(res.ledger);
       setDraft({ ledger: res.ledger, hints: [], recognizedDays: null, editingExisting: true });
     } catch (e) {
@@ -109,6 +139,7 @@ export default function Editor() {
   }
 
   const years = Array.from({ length: 12 }, (_, i) => new Date().getFullYear() - 8 + i);
+  const balanceStyle = (cents: number) => [styles.balance, cents < 0 && { color: colors.expense }];
 
   return (
     <Screen>
@@ -128,6 +159,56 @@ export default function Editor() {
           onChange={(y) => changePeriod(y, ledger.month)}
         />
       </View>
+
+      {/* Anfangssaldo */}
+      <Card>
+        <Text style={styles.cardTitle}>{t.editor.opening}</Text>
+        {manual ? (
+          <>
+            {carry === null ? <Body muted>{t.editor.firstOpening}</Body> : <Body muted>{t.editor.openingHelp}</Body>}
+            <TextInput
+              value={openingInput}
+              onChangeText={(text) => {
+                setSaved(null);
+                setOpeningInput(text);
+              }}
+              keyboardType="numbers-and-punctuation"
+              placeholder="0,00"
+              placeholderTextColor="#9A9A9A"
+              accessibilityLabel={t.editor.opening}
+              style={[styles.input, styles.openingInput, openingParsed === undefined && styles.invalid]}
+            />
+            {carry ? (
+              <Button
+                label={fmt(t.editor.useCarryOver, { amount: formatEuro(carry.amount) })}
+                variant="secondary"
+                style={{ alignSelf: 'flex-start' }}
+                onPress={() => {
+                  setSaved(null);
+                  setOpeningManual(false);
+                }}
+              />
+            ) : null}
+          </>
+        ) : (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.m }}>
+            <View style={{ flexGrow: 1 }}>
+              <Text style={[styles.openingValue, openingCents < 0 && { color: colors.expense }]}>
+                {formatEuro(openingCents)}
+              </Text>
+              <Body muted>{fmt(t.editor.carryOver, { month: monthName(carry!.year, carry!.month) })}</Body>
+            </View>
+            <Button
+              label={`✏️ ${t.editor.changeOpening}`}
+              variant="secondary"
+              onPress={() => {
+                setOpeningManual(true);
+                setOpeningInput(toInput(carry!.amount));
+              }}
+            />
+          </View>
+        )}
+      </Card>
 
       {draft?.recognizedDays != null ? (
         <Notice>
@@ -155,55 +236,85 @@ export default function Editor() {
         />
       ) : null}
 
+      {/* Tabelle: Datum | Einnahmen | Ausgaben | Saldo | Grund */}
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <View style={[styles.row, styles.headRow]}>
           <Text style={[styles.head, styles.dateCol]}>{t.editor.date}</Text>
           <Text style={[styles.head, styles.numCol, { color: colors.income }]}>{t.editor.income}</Text>
           <Text style={[styles.head, styles.numCol, { color: colors.expense }]}>{t.editor.expense}</Text>
+          <Text style={[styles.head, styles.numCol]}>{t.editor.balance}</Text>
+          {wide ? <Text style={[styles.head, styles.reasonCol]}>{t.editor.reason}</Text> : null}
         </View>
-        {ledger.entries.map((e) => {
+        {ledger.entries.map((e, i) => {
           const date = new Date(`${e.day}T12:00:00`);
           const weekday = t.weekdays[(date.getDay() + 6) % 7];
+          const dayLabel = `${weekday} ${date.getDate()}.`;
           const closedLabel = e.closed ? (e.closed.kind === 'sunday' ? t.editor.sunday : e.closed.name) : null;
           const p = parsed[e.day];
+          const reasonInput = (
+            <TextInput
+              value={rows[e.day]?.reason ?? ''}
+              onChangeText={(text) => setField(e.day, 'reason', text)}
+              placeholder={t.editor.reasonPlaceholder}
+              placeholderTextColor="#9A9A9A"
+              accessibilityLabel={`${t.editor.reason} ${dayLabel}`}
+              style={[styles.input, styles.reasonInput, wide && styles.reasonCol, e.closed && styles.closedInput]}
+            />
+          );
           return (
-            <View key={e.day} style={[styles.row, e.closed && styles.closedRow]}>
-              <View style={styles.dateCol}>
-                <Text style={[styles.dateText, e.closed && { color: colors.closedText }]}>
-                  {weekday} {String(date.getDate()).padStart(2, '0')}.{String(ledger.month).padStart(2, '0')}.
+            <View key={e.day} style={[styles.dayBlock, e.closed && styles.closedRow]}>
+              <View style={styles.row}>
+                <View style={styles.dateCol}>
+                  <Text style={[styles.dateText, e.closed && { color: colors.closedText }]}>
+                    {weekday} {String(date.getDate()).padStart(2, '0')}.{String(ledger.month).padStart(2, '0')}.
+                  </Text>
+                  {closedLabel ? <Text style={styles.closedLabel}>{closedLabel}</Text> : null}
+                </View>
+                {(['income', 'expense'] as Field[]).map((field) => (
+                  <TextInput
+                    key={field}
+                    value={rows[e.day]?.[field] ?? ''}
+                    onChangeText={(text) => setField(e.day, field, text)}
+                    keyboardType="decimal-pad"
+                    placeholder={e.closed ? '' : '0,00'}
+                    placeholderTextColor="#9A9A9A"
+                    accessibilityLabel={`${field === 'income' ? t.editor.income : t.editor.expense} ${dayLabel}`}
+                    style={[
+                      styles.input,
+                      styles.numCol,
+                      e.closed && styles.closedInput,
+                      p?.[field] === undefined && styles.invalid,
+                    ]}
+                  />
+                ))}
+                <Text
+                  style={[styles.numCol, ...balanceStyle(balances[i])]}
+                  accessibilityLabel={`${t.editor.balance} ${dayLabel}: ${formatEuro(balances[i])}`}
+                >
+                  {formatCents(balances[i])}
                 </Text>
-                {closedLabel ? <Text style={styles.closedLabel}>{closedLabel}</Text> : null}
+                {wide ? reasonInput : null}
               </View>
-              {(['income', 'expense'] as Field[]).map((field) => (
-                <TextInput
-                  key={field}
-                  value={inputs[e.day]?.[field] ?? ''}
-                  onChangeText={(text) => setField(e.day, field, text)}
-                  keyboardType="decimal-pad"
-                  placeholder={e.closed ? '' : '0,00'}
-                  placeholderTextColor="#9A9A9A"
-                  accessibilityLabel={`${field === 'income' ? t.editor.income : t.editor.expense} ${weekday} ${date.getDate()}.`}
-                  style={[
-                    styles.input,
-                    styles.numCol,
-                    e.closed && styles.closedInput,
-                    p?.[field] === undefined && styles.invalid,
-                  ]}
-                />
-              ))}
+              {wide ? null : <View style={styles.reasonLine}>{reasonInput}</View>}
             </View>
           );
         })}
         <View style={[styles.row, styles.totalRow]}>
           <Text style={[styles.totalText, styles.dateCol]}>{t.editor.total}</Text>
-          <Text style={[styles.totalText, styles.numCol, { color: colors.income }]}>{formatCents(income)} €</Text>
-          <Text style={[styles.totalText, styles.numCol, { color: colors.expense }]}>{formatCents(expense)} €</Text>
+          <Text style={[styles.totalText, styles.numCol, { color: colors.income }]}>{formatCents(income)}</Text>
+          <Text style={[styles.totalText, styles.numCol, { color: colors.expense }]}>{formatCents(expense)}</Text>
+          <Text style={[styles.totalText, styles.numCol, closing < 0 && { color: colors.expense }]}>
+            {formatCents(closing)}
+          </Text>
+          {wide ? <View style={styles.reasonCol} /> : null}
         </View>
         <View style={[styles.row, styles.totalRow]}>
-          <Text style={[styles.totalText, styles.dateCol]}>{t.editor.balance}</Text>
-          <Text style={[styles.totalText, { flex: 2, textAlign: 'right', paddingRight: space.s }]}>
-            {formatCents(income - expense)} €
-          </Text>
+          <Text style={[styles.summaryLabel, { flex: 1 }]}>{t.editor.closing}</Text>
+          <Text style={[styles.totalText, closing < 0 && { color: colors.expense }]}>{formatEuro(closing)}</Text>
+        </View>
+        <View style={[styles.row, styles.totalRow]}>
+          <Text style={[styles.summaryLabel, { flex: 1 }]}>{t.editor.result}</Text>
+          <Text style={styles.summaryValue}>{formatEuro(income - expense)}</Text>
         </View>
       </Card>
 
@@ -257,22 +368,27 @@ function formatHintParams(params: Record<string, string>): Record<string, string
 }
 
 const styles = StyleSheet.create({
+  cardTitle: { fontSize: font.large, fontWeight: '800', color: colors.text },
+  openingValue: { fontSize: font.huge, fontWeight: '800', color: colors.text },
+  openingInput: { maxWidth: 320, fontSize: font.large, textAlign: 'right' },
+  dayBlock: { borderBottomWidth: 1, borderBottomColor: '#E2E2E2' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.s,
     paddingHorizontal: space.s,
     paddingVertical: space.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E2E2E2',
   },
+  reasonLine: { paddingHorizontal: space.s, paddingBottom: space.s },
   headRow: { backgroundColor: '#EDEBE6' },
   head: { fontSize: font.body, fontWeight: '700', color: colors.text },
   dateCol: { flex: 1.1 },
   numCol: { flex: 1, textAlign: 'right' },
+  reasonCol: { flex: 2 },
   dateText: { fontSize: font.body, fontWeight: '600', color: colors.text },
   closedRow: { backgroundColor: colors.closedBg },
   closedLabel: { fontSize: font.small - 2, color: colors.closedText },
+  balance: { fontSize: font.body, fontWeight: '700', color: colors.text, paddingRight: space.xs },
   input: {
     minHeight: touch.min - 6,
     borderWidth: 2,
@@ -283,8 +399,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     color: colors.text,
   },
+  reasonInput: { textAlign: 'left' },
   closedInput: { backgroundColor: '#ECECEC', borderColor: '#B0B0B0' },
   invalid: { borderColor: colors.danger, borderWidth: 3, backgroundColor: '#FBE9E7' },
-  totalRow: { backgroundColor: '#EDEBE6', paddingVertical: space.s },
+  totalRow: { backgroundColor: '#EDEBE6', paddingVertical: space.s, borderTopWidth: 1, borderTopColor: '#D0CEC8' },
   totalText: { fontSize: font.large, fontWeight: '800', color: colors.text },
+  summaryLabel: { fontSize: font.body, fontWeight: '700', color: colors.text },
+  summaryValue: { fontSize: font.large, fontWeight: '700', color: colors.text },
 });

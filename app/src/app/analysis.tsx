@@ -7,6 +7,7 @@ import { formatEuro, toCents } from '@/lib/money';
 import { useAsync } from '@/lib/useAsync';
 import { useSettings } from '@/settings/SettingsProvider';
 import { Body, Card, Loading, Screen, Select, Title } from '@/ui/components';
+import { CurrentBalance } from '@/ui/CurrentBalance';
 import { LoadError } from '@/ui/LoadError';
 import { colors, font, space } from '@/ui/theme';
 
@@ -21,6 +22,7 @@ export default function Analysis() {
 
   return (
     <Screen>
+      <CurrentBalance />
       <View style={{ maxWidth: 360 }}>
         <Select
           label={t.analysis.year}
@@ -39,7 +41,7 @@ export default function Analysis() {
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.m }}>
             <Kpi label={t.analysis.incomeYtd} value={formatEuro(m.income_ytd)} color={colors.income} big />
             <Kpi label={t.analysis.expenseYtd} value={formatEuro(m.expense_ytd)} color={colors.expense} big />
-            <Kpi label={t.analysis.balanceYtd} value={formatEuro(m.balance_ytd)} big />
+            <Kpi label={t.analysis.resultYtd} value={formatEuro(m.result_ytd)} big />
           </View>
 
           {m.latest ? (
@@ -91,6 +93,7 @@ export default function Analysis() {
           <Card>
             <Title>{t.analysis.chart}</Title>
             <BarChart series={m.series} monthNames={t.months} />
+            <BalanceRow series={m.series} monthNames={t.months} label={t.analysis.chartBalance} />
             <View style={{ flexDirection: 'row', gap: space.l }}>
               <Body style={{ color: colors.income }}>■ {t.editor.income}</Body>
               <Body style={{ color: colors.expense }}>■ {t.editor.expense}</Body>
@@ -139,6 +142,22 @@ function BarChart({ series, monthNames }: { series: MonthPoint[]; monthNames: st
           <Text style={{ fontSize: font.small - 2, color: colors.muted }}>{monthNames[p.month - 1].slice(0, 3)}</Text>
         </View>
       ))}
+    </View>
+  );
+}
+
+/** Saldo am Ende jedes Monats als Zahlenreihe unter dem Diagramm. */
+function BalanceRow({ series, monthNames, label }: { series: MonthPoint[]; monthNames: string[]; label: string }) {
+  return (
+    <View style={{ gap: space.xs }}>
+      <Text style={{ fontSize: font.body, fontWeight: '700', color: colors.text }}>{label}</Text>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.m }}>
+        {series.map((p) => (
+          <Text key={p.month} style={{ fontSize: font.small, color: p.closing.startsWith('-') ? colors.expense : colors.text }}>
+            {monthNames[p.month - 1].slice(0, 3)}: {formatEuro(p.closing)}
+          </Text>
+        ))}
+      </View>
     </View>
   );
 }

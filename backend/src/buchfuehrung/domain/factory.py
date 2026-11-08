@@ -16,19 +16,37 @@ def blank_month(
     *,
     source: Source = "manual",
     values: Mapping[int, tuple[Decimal | None, Decimal | None]] | None = None,
+    reasons: Mapping[int, str] | None = None,
+    opening_balance: Decimal | None = None,
 ) -> LedgerMonth:
     """Ein Buchungsmonat mit einer Zeile pro Tag.
 
     `values` ordnet optional einem Tag (1–31) vorbelegte (Einnahme, Ausgabe) zu,
-    z. B. aus einem Foto. Ruhetage werden markiert, aber nicht geleert.
+    `reasons` den Grund, z. B. aus einem Foto. Ruhetage werden markiert, aber nicht geleert.
     """
     closed = closed_days(year, month, region)
     values = values or {}
+    reasons = reasons or {}
     entries: list[DayEntry] = []
     for day in days_of_month(year, month):
         income, expense = values.get(day.day, (None, None))
-        entries.append(DayEntry(day=day, income=income, expense=expense, closed=closed.get(day)))
-    return LedgerMonth(year=year, month=month, region=region, source=source, entries=entries)
+        entries.append(
+            DayEntry(
+                day=day,
+                income=income,
+                expense=expense,
+                closed=closed.get(day),
+                reason=reasons.get(day.day, ""),
+            )
+        )
+    return LedgerMonth(
+        year=year,
+        month=month,
+        region=region,
+        source=source,
+        opening_balance=opening_balance,
+        entries=entries,
+    )
 
 
 def refresh_closed_days(ledger: LedgerMonth) -> LedgerMonth:

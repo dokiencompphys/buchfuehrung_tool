@@ -111,3 +111,25 @@ def test_empty_photo_gives_blank_month():
 def test_amount_parsing(text, expected):
     result = parse_amount(text)
     assert (str(result) if result is not None else None) == expected
+
+
+def test_reason_column_is_read_and_photo_balance_is_ignored():
+    boxes = [
+        *row(10, (20, "November 2026")),
+        *row(
+            60, (20, "Datum"), (200, "Einnahmen"), (400, "Ausgaben"), (600, "Saldo"), (800, "Grund")
+        ),
+        *row(100, (20, "2."), (200, "100,00"), (600, "100,00")),
+        *row(140, (20, "3."), (400, "25,00"), (600, "75,00"), (800, "Kasse Wechselgeld")),
+    ]
+    reading = read(boxes)
+    assert entry(reading, 2).expense is None  # 100,00 unter "Saldo" ist keine Ausgabe
+    assert entry(reading, 3).expense == Decimal("25.00")
+    assert entry(reading, 3).reason == "Kasse Wechselgeld"
+
+
+def test_amount_and_reason_in_one_box():
+    boxes = [*row(10, (20, "11/2026")), *row(100, (20, "4."), (200, "12,50 Porto"))]
+    e = entry(read(boxes), 4)
+    assert e.income == Decimal("12.50")
+    assert e.reason == "Porto"

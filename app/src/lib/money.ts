@@ -1,9 +1,18 @@
 // Beträge: Eingabe im deutschen Format ("1.234,50"), intern als Cent-Ganzzahl, zum Backend als "1234.50".
 
-/** Nutzereingabe → API-String ("12.50") oder null bei leerem Feld. undefined = ungültig. */
-export function parseInput(text: string): string | null | undefined {
-  const raw = text.replace(/[€\s]/g, '').replace(/[,.]?-+$/, '');
-  if (raw === '') return null;
+/**
+ * Nutzereingabe → API-String ("12.50") oder null bei leerem Feld. undefined = ungültig.
+ * Mit `allowNegative` darf ein Minus vorne stehen (z. B. für den Anfangssaldo).
+ */
+export function parseInput(text: string, { allowNegative = false } = {}): string | null | undefined {
+  let raw = text.replace(/[€\s]/g, '');
+  let negative = false;
+  if (allowNegative && /^[-−]/.test(raw)) {
+    negative = true;
+    raw = raw.slice(1);
+  }
+  raw = raw.replace(/[,.]?-+$/, ''); // '12,-' → '12'
+  if (raw === '') return negative ? undefined : null;
   if (!/^[\d.,]+$/.test(raw)) return undefined;
   let normalized: string;
   if (raw.includes(',')) normalized = raw.replace(/\./g, '').replace(',', '.');
@@ -12,7 +21,8 @@ export function parseInput(text: string): string | null | undefined {
   if ((normalized.match(/\./g) ?? []).length > 1) return undefined;
   const value = Number(normalized);
   if (!Number.isFinite(value) || value < 0) return undefined;
-  return (Math.round(value * 100) / 100).toFixed(2);
+  const fixed = (Math.round(value * 100) / 100).toFixed(2);
+  return negative && Number(fixed) !== 0 ? `-${fixed}` : fixed;
 }
 
 /** API-String → Cent. */
@@ -35,13 +45,22 @@ export function formatCents(cents: number): string {
 
 /** API-String → Anzeige im Eingabefeld ("" für leer). */
 export function toInput(amount: string | null): string {
-  return amount === null ? '' : formatCents(toCents(amount));
+  return amount === null ? '' : formatCents(toCents(amount)).replace('−', '-');
 }
 
 export function formatEuro(amount: string | number | null | undefined): string {
   if (amount === null || amount === undefined) return '–';
   const cents = typeof amount === 'number' ? amount : toCents(amount);
   return `${formatCents(cents)} €`;
+}
+
+/** Saldo nach jedem Tag in Cent: Anfangssaldo + Einnahmen − Ausgaben, fortlaufend. */
+export function runningBalances(openingCents: number, days: [string | null, string | null][]): number[] {
+  let balance = openingCents;
+  return days.map(([income, expense]) => {
+    balance += toCents(income) - toCents(expense);
+    return balance;
+  });
 }
 
 export function sumCents(values: (string | null)[]): number {

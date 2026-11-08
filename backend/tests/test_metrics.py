@@ -2,6 +2,7 @@ from datetime import date
 from decimal import Decimal as D
 
 from buchfuehrung.analytics.metrics import compute_metrics
+from buchfuehrung.domain.balance import link_months
 from buchfuehrung.domain.factory import blank_month
 
 TODAY = date(2026, 11, 8)
@@ -23,7 +24,7 @@ def test_year_to_date_and_month_over_month():
     assert m.months_recorded == 3
     assert m.income_ytd == D("3700.00")
     assert m.expense_ytd == D("600.00")
-    assert m.balance_ytd == D("3100.00")
+    assert m.result_ytd == D("3100.00")
     assert m.avg_income_per_month == D("1233.33")
     assert (m.best_month.month, m.worst_month.month) == (9, 8)
     # Oktober gegenüber September: −300 € = −20 %
@@ -33,6 +34,20 @@ def test_year_to_date_and_month_over_month():
     # Vorjahr, gleiche Monate (Aug–Okt 2025): nur September erfasst
     assert m.income_previous_year_same_period == D("800.00")
     assert [p.month for p in m.series] == [8, 9, 10]
+
+
+def test_current_balance_is_closing_of_newest_month():
+    ledgers = link_months(
+        [
+            blank_month(2026, 9, "BE", values={2: (D("100"), D("0"))}, opening_balance=D("500")),
+            blank_month(2026, 10, "BE", values={2: (D("50"), D("200"))}),
+        ]
+    )
+    m = compute_metrics(ledgers, TODAY)
+    # 500 + 100 = 600 Ende September, 600 + 50 − 200 = 450 Ende Oktober
+    assert m.current_balance == D("450")
+    assert m.current_balance_month.month == 10
+    assert [p.closing for p in m.series] == [D("600"), D("450")]
 
 
 def test_previous_month_across_year_boundary():
@@ -46,3 +61,4 @@ def test_no_data():
     assert m.months_recorded == 0
     assert m.income_ytd == D("0.00")
     assert m.latest is None and m.avg_income_per_month is None
+    assert m.current_balance is None

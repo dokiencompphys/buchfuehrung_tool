@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 import type {
   ArchiveItem,
+  CarryOver,
   EngineInfo,
   ExportFormat,
   LedgerMonth,
@@ -91,6 +92,8 @@ export const api = {
   exportUrl: (year: number, month: number, format: ExportFormat, lang: string) =>
     `${API_URL}/api/months/${year}/${month}/export?format=${format}&lang=${lang}`,
   photoUrl: (photoId: string) => `${API_URL}/api/photos/${photoId}`,
+
+  balance: () => request<CarryOver | null>('/api/balance'),
 
   analytics: (year?: number) => request<Metrics>(`/api/analytics${year ? `?year=${year}` : ''}`),
 };

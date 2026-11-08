@@ -25,6 +25,11 @@ _VI_PERIOD_RE = re.compile(r"th[áa]ng\s*(\d{1,2})", re.IGNORECASE)
 INCOME_WORDS = ("einnahme", "einnahmen", "ein", "thu", "thu nhập", "doanh thu")
 EXPENSE_WORDS = ("ausgabe", "ausgaben", "aus", "chi", "chi phí")
 DATE_WORDS = ("datum", "tag", "ngày")
+BALANCE_WORDS = ("saldo", "bestand", "kassenstand", "kasse", "số dư", "so du", "tồn quỹ")
+REASON_WORDS = (
+    "grund", "zweck", "bemerkung", "beschreibung", "verwendung", "text",
+    "lý do", "ly do", "ghi chú", "ghi chu", "nội dung", "noi dung",
+)  # fmt: skip
 TOTAL_WORDS = ("summe", "gesamt", "total", "tổng", "tong")
 
 

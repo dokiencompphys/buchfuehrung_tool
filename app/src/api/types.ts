@@ -9,10 +9,19 @@ export type DayEntry = {
   income: Amount;
   expense: Amount;
   closed: ClosedDay | null;
-  note: string;
+  reason: string; // Grund
 };
 
-export type Totals = { income: string; expense: string; balance: string };
+export type Totals = {
+  income: string;
+  expense: string;
+  result: string; // Überschuss = Einnahmen − Ausgaben
+  opening: string; // Anfangssaldo
+  closing: string; // Endsaldo
+};
+
+/** Übertrag: Endsaldo des letzten früheren Monats in der Ablage. */
+export type CarryOver = { amount: string; year: number; month: number };
 
 export type LedgerMonth = {
   year: number;
@@ -20,6 +29,8 @@ export type LedgerMonth = {
   region: string;
   source: 'manual' | 'photo';
   photo_id: string | null;
+  opening_balance: Amount; // manuell gesetzt; null = Übertrag verwenden
+  carry_over: CarryOver | null; // vom Server gesetzt
   entries: DayEntry[];
   totals?: Totals;
 };
@@ -38,6 +49,7 @@ export type ArchiveItem = {
   region: string;
   source: 'manual' | 'photo';
   has_photo: boolean;
+  opening_is_manual: boolean;
   totals: Totals;
   created_at: string;
   updated_at: string;
@@ -48,7 +60,8 @@ export type MonthPoint = {
   month: number;
   income: string;
   expense: string;
-  balance: string;
+  result: string;
+  closing: string;
 };
 
 export type Metrics = {
@@ -56,7 +69,9 @@ export type Metrics = {
   months_recorded: number;
   income_ytd: string;
   expense_ytd: string;
-  balance_ytd: string;
+  result_ytd: string;
+  current_balance: string | null;
+  current_balance_month: MonthPoint | null;
   income_previous_year_same_period: string | null;
   avg_income_per_month: string | null;
   avg_income_per_open_day: string | null;

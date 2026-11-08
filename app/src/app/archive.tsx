@@ -10,6 +10,7 @@ import { formatEuro } from '@/lib/money';
 import { useAsync } from '@/lib/useAsync';
 import { useSettings } from '@/settings/SettingsProvider';
 import { Body, Button, Card, Loading, Screen } from '@/ui/components';
+import { CurrentBalance } from '@/ui/CurrentBalance';
 import { LoadError } from '@/ui/LoadError';
 import { colors, font, space } from '@/ui/theme';
 
@@ -37,6 +38,7 @@ export default function Archive() {
 
   return (
     <Screen>
+      <CurrentBalance />
       {info.data ? (
         <Body muted>
           {t.archive.location} {info.data.data_dir}
@@ -54,7 +56,7 @@ export default function Archive() {
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: space.s }}>
               <Text style={{ fontSize: font.large, fontWeight: '800', color: colors.text }}>📁 {name}</Text>
               <Body muted>
-                {it.region} · {it.source === 'photo' ? t.archive.fromPhoto : t.archive.manual}
+                {it.region} · {it.source === 'photo' ? t.archive.fromPhoto : t.archive.selfEntered}
               </Body>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.l }}>
@@ -64,8 +66,17 @@ export default function Archive() {
               <Body style={{ color: colors.expense }}>
                 {t.editor.expense}: {formatEuro(it.totals.expense)}
               </Body>
-              <Body style={{ fontWeight: '700' }}>
-                {t.editor.balance}: {formatEuro(it.totals.balance)}
+              <Body>
+                {t.archive.result}: {formatEuro(it.totals.result)}
+              </Body>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.l }}>
+              <Body>
+                {t.archive.opening}: {formatEuro(it.totals.opening)}
+                {it.opening_is_manual ? ` (${t.archive.manual})` : ''}
+              </Body>
+              <Body style={{ fontWeight: '800', color: it.totals.closing.startsWith('-') ? colors.expense : colors.text }}>
+                {t.archive.closing}: {formatEuro(it.totals.closing)}
               </Body>
             </View>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.s }}>

@@ -14,7 +14,7 @@ from buchfuehrung.analytics.metrics import Metrics, compute_metrics
 from buchfuehrung.calendars.closed_days import Region, UnknownRegion, regions
 from buchfuehrung.config import Settings
 from buchfuehrung.domain.factory import blank_month, refresh_closed_days
-from buchfuehrung.domain.ledger import LedgerMonth
+from buchfuehrung.domain.ledger import CarryOver, LedgerMonth
 from buchfuehrung.export.exporter import ExportFormat, export_ledger
 from buchfuehrung.export.labels import Lang
 from buchfuehrung.ocr.engine import EngineUnavailable
@@ -97,16 +97,17 @@ def create_app(
 
     @app.get("/api/drafts/blank")
     def blank_draft(
+        store: ArchiveDep,
         year: Annotated[int, Query(ge=2000, le=2100)],
         month: Annotated[int, Query(ge=1, le=12)],
         region: str,
     ) -> LedgerMonth:
-        return blank_month(year, month, region)
+        return _with_carry_over(store, blank_month(year, month, region))
 
     @app.post("/api/drafts/refresh")
-    def refresh_draft(ledger: LedgerMonth) -> LedgerMonth:
-        """Ruhetage neu setzen, z. B. nachdem das Bundesland geändert wurde."""
-        return refresh_closed_days(ledger)
+    def refresh_draft(ledger: LedgerMonth, store: ArchiveDep) -> LedgerMonth:
+        """Ruhetage und Übertrag neu setzen, z. B. nachdem das Bundesland geändert wurde."""
+        return _with_carry_over(store, refresh_closed_days(ledger))
 
     @app.post("/api/drafts/photo")
     def photo_draft(
@@ -126,8 +127,10 @@ def create_app(
             raise HTTPException(503, str(exc)) from exc
         reading = read_photo(content, ocr, region, fallback=today())
         photo_id = store.store_photo(content, Path(photo.filename or "").suffix)
-        reading.ledger.photo_id = photo_id
-        return reading
+        ledger = _with_carry_over(store, reading.ledger)
+        return reading.model_copy(
+            update={"ledger": ledger.model_copy(update={"photo_id": photo_id})}
+        )
 
     # --- Ablage ---------------------------------------------------------------------
 
@@ -174,6 +177,11 @@ def create_app(
             raise HTTPException(404, "Foto nicht gefunden")
         return FileResponse(path)
 
+    @app.get("/api/balance")
+    def current_balance(store: ArchiveDep) -> CarryOver | None:
+        """Aktueller Saldo (Endsaldo des neuesten Monats) oder null, wenn die Ablage leer ist."""
+        return store.current_balance()
+
     # --- Analyse --------------------------------------------------------------------
 
     @app.get("/api/analytics")
@@ -181,6 +189,11 @@ def create_app(
         return compute_metrics(store.all(), today=today(), year=year)
 
     return app
+
+
+def _with_carry_over(store: Archive, ledger: LedgerMonth) -> LedgerMonth:
+    carry = store.carry_over_for(ledger.year, ledger.month)
+    return ledger.model_copy(update={"carry_over": carry})
 
 
 def _require(store: Archive, year: int, month: int) -> LedgerMonth:

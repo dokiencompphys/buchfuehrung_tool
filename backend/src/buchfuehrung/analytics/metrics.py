@@ -1,7 +1,8 @@
 """Kennzahlen über alle abgelegten Buchungsmonate.
 
 Öffentliche Schnittstelle: `compute_metrics(ledgers, today) -> Metrics`.
-"Umsatz" = Summe der Einnahmen. "Gewinn" = Einnahmen − Ausgaben.
+`ledgers` müssen verkettet sein (`domain.balance.link_months`), damit Salden stimmen.
+"Umsatz" = Summe der Einnahmen. "Überschuss" = Einnahmen − Ausgaben. "Saldo" = Kassenstand.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ class MonthPoint(BaseModel):
     month: int
     income: Decimal
     expense: Decimal
-    balance: Decimal
+    result: Decimal  # Überschuss
+    closing: Decimal  # Endsaldo
 
 
 class Comparison(BaseModel):
@@ -34,7 +36,9 @@ class Metrics(BaseModel):
     months_recorded: int
     income_ytd: Decimal
     expense_ytd: Decimal
-    balance_ytd: Decimal
+    result_ytd: Decimal
+    current_balance: Decimal | None  # Endsaldo des neuesten Monats überhaupt
+    current_balance_month: MonthPoint | None
     income_previous_year_same_period: Decimal | None
     avg_income_per_month: Decimal | None
     avg_income_per_open_day: Decimal | None
@@ -64,6 +68,7 @@ def compute_metrics(ledgers: list[LedgerMonth], today: date, year: int | None = 
         if e.closed is None and e.income is not None
     ]
 
+    newest = points[max(points)] if points else None
     latest = _latest_comparison(points, this_year)
     same_month_last_year = points.get((year - 1, latest.current.month)) if latest else None
 
@@ -72,7 +77,9 @@ def compute_metrics(ledgers: list[LedgerMonth], today: date, year: int | None = 
         months_recorded=len(this_year),
         income_ytd=income,
         expense_ytd=expense,
-        balance_ytd=income - expense,
+        result_ytd=income - expense,
+        current_balance=newest.closing if newest else None,
+        current_balance_month=newest,
         income_previous_year_same_period=(
             sum((p.income for p in prev_year_same), ZERO) if prev_year_same else None
         ),
@@ -93,7 +100,12 @@ def compute_metrics(ledgers: list[LedgerMonth], today: date, year: int | None = 
 def _point(lg: LedgerMonth) -> MonthPoint:
     t = lg.totals
     return MonthPoint(
-        year=lg.year, month=lg.month, income=t.income, expense=t.expense, balance=t.balance
+        year=lg.year,
+        month=lg.month,
+        income=t.income,
+        expense=t.expense,
+        result=t.result,
+        closing=t.closing,
     )
 
 

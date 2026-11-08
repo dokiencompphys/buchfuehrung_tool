@@ -1,7 +1,11 @@
 """Buchungsmonat: das zentrale Domänenobjekt.
 
 Ein Buchungsmonat hat für jeden Kalendertag genau eine Tageszeile.
-Summen werden immer berechnet, nie gespeichert.
+Summen und Salden werden immer berechnet, nie gespeichert.
+
+Saldo = Kassenstand. Anfangssaldo eines Monats ist entweder manuell gesetzt
+(`opening_balance`) oder der Übertrag aus dem vorherigen Monat (`carry_over`,
+wird beim Lesen aus der Ablage gesetzt, siehe `domain/balance.py`).
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, computed_field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, computed_field, model_validator
 
 ZERO = Decimal("0.00")
 
@@ -34,13 +38,24 @@ class DayEntry(BaseModel):
     income: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     expense: Decimal | None = Field(default=None, ge=0, decimal_places=2)
     closed: ClosedDay | None = None
-    note: str = ""
+    # Grund: wofür das Geld ausgegeben (oder eingenommen) wurde. "note" = alter Name.
+    reason: str = Field(default="", validation_alias=AliasChoices("reason", "note"))
+
+
+class CarryOver(BaseModel):
+    """Übertrag: Endsaldo des letzten früheren Monats in der Ablage."""
+
+    amount: Decimal
+    year: int
+    month: int
 
 
 class Totals(BaseModel):
     income: Decimal
     expense: Decimal
-    balance: Decimal
+    result: Decimal  # Überschuss des Monats = Einnahmen − Ausgaben
+    opening: Decimal  # Anfangssaldo
+    closing: Decimal  # Endsaldo = Anfangssaldo + Überschuss
 
 
 Source = Literal["manual", "photo"]
@@ -52,6 +67,8 @@ class LedgerMonth(BaseModel):
     region: str
     source: Source = "manual"
     photo_id: str | None = None
+    opening_balance: Decimal | None = Field(default=None, decimal_places=2)
+    carry_over: CarryOver | None = None
     entries: list[DayEntry]
 
     @model_validator(mode="after")
@@ -65,12 +82,34 @@ class LedgerMonth(BaseModel):
         self.entries.sort(key=lambda e: e.day)
         return self
 
+    @property
+    def effective_opening(self) -> Decimal:
+        if self.opening_balance is not None:
+            return self.opening_balance
+        return self.carry_over.amount if self.carry_over is not None else ZERO
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def totals(self) -> Totals:
         income = sum((e.income or ZERO for e in self.entries), ZERO)
         expense = sum((e.expense or ZERO for e in self.entries), ZERO)
-        return Totals(income=income, expense=expense, balance=income - expense)
+        opening = self.effective_opening
+        return Totals(
+            income=income,
+            expense=expense,
+            result=income - expense,
+            opening=opening,
+            closing=opening + income - expense,
+        )
+
+    def running_balances(self) -> list[Decimal]:
+        """Saldo am Ende jedes Tages, in der Reihenfolge der Tageszeilen."""
+        balance = self.effective_opening
+        result = []
+        for e in self.entries:
+            balance += (e.income or ZERO) - (e.expense or ZERO)
+            result.append(balance)
+        return result
 
     @property
     def period(self) -> str:

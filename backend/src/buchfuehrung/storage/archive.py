@@ -14,7 +14,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from buchfuehrung.domain.ledger import LedgerMonth, Totals
+from buchfuehrung.domain.balance import carry_over_before, link_months
+from buchfuehrung.domain.ledger import CarryOver, LedgerMonth, Totals
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS ledger_months (
@@ -34,6 +35,7 @@ class ArchiveItem(BaseModel):
     region: str
     source: str
     has_photo: bool
+    opening_is_manual: bool
     totals: Totals
     created_at: datetime
     updated_at: datetime
@@ -53,6 +55,8 @@ class Archive:
     def save(self, ledger: LedgerMonth) -> tuple[LedgerMonth, bool]:
         """Speichert (oder ersetzt) einen Monat. Gibt zurück, ob er neu war."""
         now = _now()
+        # Übertrag und Summen werden immer frisch berechnet, nie gespeichert
+        data = ledger.model_dump_json(exclude={"carry_over", "totals"})
         with self._connect() as db:
             existed = self._exists(db, ledger.year, ledger.month)
             db.execute(
@@ -62,16 +66,23 @@ class Archive:
                 ON CONFLICT (year, month) DO UPDATE SET data = excluded.data,
                     updated_at = excluded.updated_at
                 """,
-                (ledger.year, ledger.month, ledger.model_dump_json(), now, now),
+                (ledger.year, ledger.month, data, now, now),
             )
-        return ledger, not existed
+        saved = self.get(ledger.year, ledger.month)
+        assert saved is not None
+        return saved, not existed
 
     def get(self, year: int, month: int) -> LedgerMonth | None:
-        with self._connect() as db:
-            row = db.execute(
-                "SELECT data FROM ledger_months WHERE year = ? AND month = ?", (year, month)
-            ).fetchone()
-        return LedgerMonth.model_validate_json(row[0]) if row else None
+        """Ein Monat mit Übertrag aus dem vorherigen Monat der Ablage."""
+        return next((lg for lg in self.all() if (lg.year, lg.month) == (year, month)), None)
+
+    def carry_over_for(self, year: int, month: int) -> CarryOver | None:
+        """Übertrag, den ein (neuer) Monat aus der Ablage bekäme."""
+        return carry_over_before(self.all(), year, month)
+
+    def current_balance(self) -> CarryOver | None:
+        """Aktueller Saldo = Endsaldo des neuesten Monats."""
+        return carry_over_before(self.all(), 9999, 12)
 
     def exists(self, year: int, month: int) -> bool:
         with self._connect() as db:
@@ -85,20 +96,23 @@ class Archive:
         return cur.rowcount > 0
 
     def all(self) -> list[LedgerMonth]:
+        """Alle Monate chronologisch, mit Übertrag von Monat zu Monat."""
         with self._connect() as db:
             rows = db.execute("SELECT data FROM ledger_months ORDER BY year, month").fetchall()
-        return [LedgerMonth.model_validate_json(r[0]) for r in rows]
+        return link_months(LedgerMonth.model_validate_json(r[0]) for r in rows)
 
     def list_items(self) -> list[ArchiveItem]:
         """Neueste zuerst – so wie man in einem Ordner blättert."""
         with self._connect() as db:
-            rows = db.execute(
-                "SELECT data, created_at, updated_at FROM ledger_months "
-                "ORDER BY year DESC, month DESC"
-            ).fetchall()
+            stamps = {
+                (y, m): (created, updated)
+                for y, m, created, updated in db.execute(
+                    "SELECT year, month, created_at, updated_at FROM ledger_months"
+                )
+            }
         items = []
-        for data, created, updated in rows:
-            ledger = LedgerMonth.model_validate_json(data)
+        for ledger in reversed(self.all()):
+            created, updated = stamps[(ledger.year, ledger.month)]
             items.append(
                 ArchiveItem(
                     year=ledger.year,
@@ -106,6 +120,7 @@ class Archive:
                     region=ledger.region,
                     source=ledger.source,
                     has_photo=ledger.photo_id is not None,
+                    opening_is_manual=ledger.opening_balance is not None,
                     totals=ledger.totals,
                     created_at=datetime.fromisoformat(created),
                     updated_at=datetime.fromisoformat(updated),

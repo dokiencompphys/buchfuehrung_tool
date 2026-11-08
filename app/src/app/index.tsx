@@ -3,12 +3,14 @@ import { View } from 'react-native';
 
 import { useSettings } from '@/settings/SettingsProvider';
 import { Screen, Tile } from '@/ui/components';
+import { CurrentBalance } from '@/ui/CurrentBalance';
 import { space } from '@/ui/theme';
 
 export default function Home() {
   const { t } = useSettings();
   return (
     <Screen>
+      <CurrentBalance />
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: space.m }}>
         <Tile
           icon="📊"
