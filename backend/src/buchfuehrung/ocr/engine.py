@@ -19,6 +19,8 @@ class TextBox(BaseModel):
     x1: float
     y1: float
     confidence: float = 1.0
+    # Wird nicht von der Engine gesetzt, sondern danach im Bild geprüft (ocr/strike.py)
+    struck: bool = False
 
     @property
     def cx(self) -> float:

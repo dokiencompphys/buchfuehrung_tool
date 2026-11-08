@@ -1,12 +1,13 @@
 // Hält den aktuellen Entwurf zwischen "Foto lesen" und dem Tabellen-Editor.
 import { createContext, type ReactNode, useContext, useState } from 'react';
 
-import type { Hint, LedgerMonth } from '@/api/types';
+import type { Hint, LedgerMonth, PhotoChecks } from '@/api/types';
 
 export type Draft = {
   ledger: LedgerMonth;
   hints: Hint[];
   recognizedDays: number | null; // null = nicht vom Foto
+  checks: PhotoChecks | null; // nur bei Fotos: zum Gegenprüfen
   editingExisting: boolean;
 };
 

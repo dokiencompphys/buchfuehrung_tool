@@ -55,8 +55,8 @@ def test_csv_shows_running_balance_and_reason(ledger):
     assert lines[-1] == "Überschuss (Einnahmen − Ausgaben);1.329,50;;;"
 
 
-def test_manual_opening_balance_wins_over_carry_over(ledger):
-    manual = ledger.model_copy(update={"opening_balance": Decimal("-50.00")})
+def test_first_month_exports_its_own_start_value(ledger):
+    manual = ledger.model_copy(update={"carry_over": None, "opening_balance": Decimal("-50.00")})
     lines = export_ledger(manual, ExportFormat.CSV).content.decode("utf-8-sig").splitlines()
     assert lines[1] == "Anfangssaldo;;;-50,00;"
     assert lines[-2].endswith(";1.279,50;")

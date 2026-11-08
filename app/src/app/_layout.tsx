@@ -1,6 +1,6 @@
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { Pressable, Text } from 'react-native';
+import { Pressable, Text, useWindowDimensions } from 'react-native';
 
 import { DraftProvider } from '@/draft/DraftProvider';
 import { SettingsProvider, useSettings } from '@/settings/SettingsProvider';
@@ -8,15 +8,17 @@ import { colors, font } from '@/ui/theme';
 
 function SettingsButton() {
   const { t } = useSettings();
+  // Auf dem Handy nur das Zahnrad, sonst überdeckt der Text den Seitentitel
+  const compact = useWindowDimensions().width < 600;
   return (
     <Pressable
       onPress={() => router.push('/settings')}
       accessibilityRole="button"
       accessibilityLabel={t.settings.title}
-      style={{ paddingHorizontal: 16, minHeight: 56, justifyContent: 'center' }}
+      style={{ paddingHorizontal: 16, minHeight: 56, minWidth: 56, justifyContent: 'center', alignItems: 'center' }}
     >
-      <Text style={{ fontSize: font.body, color: colors.primaryText, fontWeight: '700' }}>
-        ⚙ {t.settings.title}
+      <Text style={{ fontSize: compact ? font.large : font.body, color: colors.primaryText, fontWeight: '700' }}>
+        {compact ? '⚙' : `⚙ ${t.settings.title}`}
       </Text>
     </Pressable>
   );

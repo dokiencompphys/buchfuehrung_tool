@@ -166,6 +166,9 @@ def create_app(
         """Legt einen Monat ab. Einen vorhandenen ersetzt nur `?replace=true`, sonst 409."""
         if (ledger.year, ledger.month) != (year, month):
             raise HTTPException(422, "Monat/Jahr in Adresse und Daten stimmen nicht überein")
+        if store.carry_over_for(year, month) is not None:
+            # Nicht der erste Monat: Anfangssaldo ist der Übertrag, ein eigener Wert gilt nicht
+            ledger = ledger.model_copy(update={"opening_balance": None})
         saved, created = store.save(ledger, replace=replace)
         return SaveResponse(ledger=saved, created=created)
 

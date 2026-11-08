@@ -43,13 +43,21 @@ def test_each_month_carries_over_the_previous_closing_balance():
     assert linked[2].carry_over.month == 10
 
 
-def test_manual_opening_balance_restarts_the_chain():
-    # Kassensturz im November: tatsächlich nur 900 € in der Kasse
+def test_opening_balance_counts_only_in_the_first_month():
+    # Im November steht ein eigener Wert – er gilt nicht, die Kette bleibt geschlossen
     linked = link_months(
         [month(10, "500", opening=D("100")), month(11, "50", opening=D("900")), month(12, "10")]
     )
-    assert linked[1].totals.opening == D("900")
-    assert linked[2].totals.opening == D("950")
+    assert linked[0].totals.opening == D("100")
+    assert linked[1].totals.opening == D("600")  # Endsaldo Oktober: 100 + 500
+    assert linked[2].totals.opening == D("650")
+
+
+def test_month_added_before_the_first_takes_over_the_start_value():
+    # Erst November mit Startwert 1000 erfasst, später Oktober nachgetragen
+    linked = link_months([month(11, "50", opening=D("1000")), month(10, "20", opening=D("300"))])
+    assert linked[0].totals.opening == D("300")  # Oktober ist jetzt der erste Monat
+    assert linked[1].totals.opening == D("320")  # November übernimmt Oktobers Endsaldo
 
 
 def test_gap_months_carry_from_the_last_recorded_month():

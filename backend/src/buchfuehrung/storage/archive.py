@@ -136,7 +136,8 @@ class Archive:
                     region=ledger.region,
                     source=ledger.source,
                     has_photo=ledger.photo_id is not None,
-                    opening_is_manual=ledger.opening_balance is not None,
+                    opening_is_manual=ledger.carry_over is None
+                    and ledger.opening_balance is not None,
                     totals=ledger.totals,
                     created_at=datetime.fromisoformat(created),
                     updated_at=datetime.fromisoformat(updated),

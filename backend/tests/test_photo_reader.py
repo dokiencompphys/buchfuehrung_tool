@@ -68,18 +68,81 @@ def test_closed_days_are_marked_but_keep_values():
     assert first.income == Decimal("50.00")
 
 
-def test_total_row_is_checked_against_rows():
+def test_total_row_is_returned_for_checking():
     boxes = [
         *row(10, (20, "November 2026")),
-        *row(60, (20, "Datum"), (200, "Einnahmen"), (400, "Ausgaben")),
-        *row(100, (20, "2."), (200, "100,00"), (400, "10,00")),
-        *row(140, (20, "3."), (200, "50,00"), (400, "5,00")),
-        *row(180, (20, "Summe"), (200, "160,00"), (400, "15,00")),
+        *row(60, (20, "Datum"), (200, "Einnahmen"), (400, "Ausgaben"), (600, "Saldo")),
+        *row(100, (20, "2."), (200, "100,00"), (400, "10,00"), (600, "90,00")),
+        *row(140, (20, "3."), (200, "50,00"), (400, "5,00"), (600, "135,00")),
+        *row(180, (20, "Summe"), (200, "160,00"), (400, "15,00"), (600, "135,00")),
+    ]
+    checks = read(boxes).checks
+    # Nur gelesen, nicht verglichen – das macht die App live beim Korrigieren
+    assert (checks.total_income, checks.total_expense) == (Decimal("160.00"), Decimal("15.00"))
+    assert checks.closing == Decimal("135.00")
+
+
+HEADER = row(60, (20, "Datum"), (200, "Einnahmen"), (400, "Ausgaben"), (600, "Saldo"))
+
+
+def test_opening_row_and_balance_column_are_read_for_checking():
+    boxes = [
+        *row(10, (20, "November 2026")),
+        *HEADER,
+        *row(80, (20, "Übertrag"), (600, "1.000,00")),
+        *row(100, (20, "2."), (200, "100,00"), (600, "1.100,00")),
+        *row(140, (20, "3."), (400, "25,00"), (600, "1.075,00")),
     ]
     reading = read(boxes)
-    mismatches = [h for h in reading.hints if h.code == "total_mismatch"]
-    assert [m.params["column"] for m in mismatches] == ["income"]
-    assert mismatches[0].params == {"column": "income", "photo": "160.00", "computed": "150.00"}
+    assert reading.checks.opening == Decimal("1000.00")
+    assert reading.checks.balances == {2: Decimal("1100.00"), 3: Decimal("1075.00")}
+    # Vorschlag für den ersten Monat; sonst gilt der Übertrag
+    assert reading.ledger.opening_balance == Decimal("1000.00")
+    assert entry(reading, 3).expense == Decimal("25.00")
+    assert reading.checks.suspects == []
+
+
+def struck(box):
+    return box.model_copy(update={"struck": True})
+
+
+def test_struck_number_is_replaced_by_the_correction_and_reported():
+    old, new = row(100, (380, "12,50"), (470, "15,00"))
+    boxes = [*row(10, (20, "11/2026")), *HEADER, *row(100, (20, "4.")), struck(old), new]
+    reading = read(boxes)
+    assert entry(reading, 4).expense == Decimal("15.00")
+    [suspect] = reading.checks.suspects
+    assert (suspect.day, suspect.field, suspect.reason) == (4, "expense", "struck")
+    assert suspect.read == [Decimal("12.50"), Decimal("15.00")]
+    assert suspect.struck == [Decimal("12.50")]
+
+
+def test_struck_number_without_correction_counts_as_empty_but_is_reported():
+    [old] = row(100, (200, "40,00"))
+    reading = read([*row(10, (20, "11/2026")), *HEADER, *row(100, (20, "5.")), struck(old)])
+    assert entry(reading, 5).income is None
+    assert [(s.day, s.field, s.reason) for s in reading.checks.suspects] == [
+        (5, "income", "struck")
+    ]
+
+
+def test_several_numbers_in_one_cell_are_reported():
+    boxes = [
+        *row(10, (20, "11/2026")),
+        *HEADER,
+        *row(100, (20, "6."), (370, "8,00"), (450, "9,00")),
+    ]
+    reading = read(boxes)
+    assert entry(reading, 6).expense == Decimal("9.00")
+    assert reading.checks.suspects[0].reason == "several"
+
+
+def test_poorly_read_number_is_reported():
+    [day, amount] = row(100, (20, "7."), (200, "3,80"))
+    boxes = [*row(10, (20, "11/2026")), *HEADER, day, amount.model_copy(update={"confidence": 0.5})]
+    reading = read(boxes)
+    assert entry(reading, 7).income == Decimal("3.80")
+    assert reading.checks.suspects[0].reason == "unsure"
 
 
 def test_days_beyond_month_end_are_dropped():
@@ -113,7 +176,7 @@ def test_amount_parsing(text, expected):
     assert (str(result) if result is not None else None) == expected
 
 
-def test_reason_column_is_read_and_photo_balance_is_ignored():
+def test_reason_column_is_read_and_photo_balance_is_not_an_expense():
     boxes = [
         *row(10, (20, "November 2026")),
         *row(

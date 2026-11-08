@@ -3,9 +3,10 @@
 Ein Buchungsmonat hat für jeden Kalendertag genau eine Tageszeile.
 Summen und Salden werden immer berechnet, nie gespeichert.
 
-Saldo = Kassenstand. Anfangssaldo eines Monats ist entweder manuell gesetzt
-(`opening_balance`) oder der Übertrag aus dem vorherigen Monat (`carry_over`,
-wird beim Lesen aus der Ablage gesetzt, siehe `domain/balance.py`).
+Saldo = Kassenstand. Anfangssaldo eines Monats ist immer der Übertrag aus dem
+vorherigen Monat (`carry_over`, wird beim Lesen aus der Ablage gesetzt, siehe
+`domain/balance.py`). Nur der allererste Monat hat keinen Übertrag; dort gilt der
+eingetragene Startwert (`opening_balance`), sonst 0.
 """
 
 from __future__ import annotations
@@ -84,9 +85,9 @@ class LedgerMonth(BaseModel):
 
     @property
     def effective_opening(self) -> Decimal:
-        if self.opening_balance is not None:
-            return self.opening_balance
-        return self.carry_over.amount if self.carry_over is not None else ZERO
+        if self.carry_over is not None:
+            return self.carry_over.amount  # Kette darf nicht unterbrochen werden (ADR 0004)
+        return self.opening_balance if self.opening_balance is not None else ZERO
 
     @computed_field  # type: ignore[prop-decorator]
     @property

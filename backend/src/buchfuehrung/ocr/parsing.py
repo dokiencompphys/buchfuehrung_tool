@@ -31,6 +31,11 @@ REASON_WORDS = (
     "lý do", "ly do", "ghi chú", "ghi chu", "nội dung", "noi dung",
 )  # fmt: skip
 TOTAL_WORDS = ("summe", "gesamt", "total", "tổng", "tong")
+# Zeile mit dem Anfangssaldo (vor dem ersten Tag)
+OPENING_WORDS = (
+    "übertrag", "uebertrag", "vortrag", "anfangssaldo", "anfangsbestand", "saldo vormonat",
+    "vormonat", "số dư đầu", "so du dau", "đầu kỳ", "chuyển sang", "tồn đầu",
+)  # fmt: skip
 
 
 def parse_amount(text: str) -> Decimal | None:

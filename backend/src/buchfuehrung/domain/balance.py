@@ -2,8 +2,8 @@
 
 Öffentliche Schnittstelle: `link_months(ledgers)` und `carry_over_before(linked, year, month)`.
 Übertrag kommt immer vom letzten früheren Monat in der Ablage – auch wenn
-dazwischen Monate fehlen. Ein manuell gesetzter Anfangssaldo hat Vorrang und
-gilt dann als neuer Startpunkt für alle folgenden Monate.
+dazwischen Monate fehlen. Einen Anfangssaldo eintragen kann man nur im ersten
+Monat der Ablage; in allen späteren gilt immer der Übertrag (ADR 0004).
 """
 
 from __future__ import annotations

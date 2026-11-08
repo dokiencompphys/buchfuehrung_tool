@@ -37,7 +37,25 @@ export type LedgerMonth = {
 
 export type Hint = { code: string; params: Record<string, string> };
 
-export type PhotoReading = { ledger: LedgerMonth; hints: Hint[]; recognized_days: number };
+export type SuspectCell = {
+  day: number;
+  field: 'income' | 'expense';
+  reason: 'struck' | 'several' | 'unsure';
+  read: string[];
+  struck: string[];
+};
+
+/** Was auf dem Foto zum Gegenprüfen stand (Beträge als Strings wie überall). */
+export type PhotoChecks = {
+  opening: string | null;
+  balances: Record<string, string>;
+  total_income: string | null;
+  total_expense: string | null;
+  closing: string | null;
+  suspects: SuspectCell[];
+};
+
+export type PhotoReading = { ledger: LedgerMonth; hints: Hint[]; recognized_days: number; checks: PhotoChecks };
 
 export type Region = { code: string; name: string };
 

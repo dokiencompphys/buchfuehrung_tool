@@ -80,6 +80,9 @@ def test_photo_flow_with_demo_engine(client):
     entries = body["ledger"]["entries"]
     assert entries[1]["reason"] == "Brot"
     assert entries[3]["expense"] is None  # Saldo-Spalte vom Foto nicht als Ausgabe gelesen
+    # … sondern als Prüfdatum für die App
+    assert body["checks"]["balances"]["4"] == "1561.70"
+    assert body["checks"]["suspects"] == []
     photo_id = body["ledger"]["photo_id"]
     stored = Image.open(io.BytesIO(client.get(f"/api/photos/{photo_id}").content))
     assert (stored.format, stored.size) == ("JPEG", (400, 300))
@@ -172,6 +175,16 @@ def test_balance_carries_over_and_updates_when_earlier_month_changes(client):
     assert client.get("/api/balance").json() == {"amount": "1350.00", "year": 2026, "month": 11}
     items = client.get("/api/months").json()
     assert [i["totals"]["closing"] for i in items] == ["1350.00", "1300.00"]
+    assert [i["opening_is_manual"] for i in items] == [False, True]
+
+
+def test_opening_balance_of_a_later_month_cannot_be_overridden(client):
+    save(client, blank(client, 2026, 10), income="100.00", opening="1000.00")
+    november = blank(client, 2026, 11)
+    saved = save(client, november, income="5.00", opening="99.00")["ledger"]
+    assert saved["opening_balance"] is None
+    assert saved["totals"]["opening"] == "1100.00"
+    items = client.get("/api/months").json()
     assert [i["opening_is_manual"] for i in items] == [False, True]
 
 

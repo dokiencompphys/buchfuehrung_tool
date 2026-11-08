@@ -21,7 +21,7 @@ export default function NewMonth() {
     const now = new Date();
     await run(t.common.loading, async () => {
       const ledger = await api.blankDraft(now.getFullYear(), now.getMonth() + 1, settings.region);
-      setDraft({ ledger, hints: [], recognizedDays: null, editingExisting: false });
+      setDraft({ ledger, hints: [], recognizedDays: null, checks: null, editingExisting: false });
       router.push('/editor');
     });
   }
@@ -39,6 +39,7 @@ export default function NewMonth() {
         ledger: reading.ledger,
         hints: reading.hints,
         recognizedDays: reading.recognized_days,
+        checks: reading.checks,
         editingExisting: false,
       });
       router.push('/editor');

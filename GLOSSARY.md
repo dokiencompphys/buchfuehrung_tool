@@ -34,6 +34,10 @@ _Vermeiden_: Gewinn, Saldo.
 
 **Foto-Lesung** (_PhotoReading_): Das Ergebnis der Texterkennung: ein Entwurf plus Hinweise. Immer nur ein Vorschlag.
 
+**Prüfung** (_PhotoChecks_, _Issue_): Vergleich der gelesenen Zahlen mit dem, was zusätzlich auf dem Foto steht (Anfangssaldo, Saldo je Tag, Summen). Eine **Abweichung** zeigt die App, bis der Nutzer korrigiert oder „Stimmt so“ tippt.
+
+**Verdächtige Zelle** (_SuspectCell_): Betrag auf dem Foto, der durchgestrichen, mehrfach oder schlecht lesbar ist. Wird immer zur Prüfung angezeigt.
+
 **Hinweis** (_Hint_): Eine Meldung zur Foto-Lesung (z. B. „Summe weicht ab“), die der Nutzer prüfen soll.
 
 **Ablage** (_Archive_): Alle erstellten Buchungsmonate samt Originalfotos.

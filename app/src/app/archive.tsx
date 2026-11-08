@@ -25,7 +25,7 @@ export default function Archive() {
 
   async function open(year: number, month: number) {
     const ledger = await api.month(year, month);
-    setDraft({ ledger, hints: [], recognizedDays: null, editingExisting: true });
+    setDraft({ ledger, hints: [], recognizedDays: null, checks: null, editingExisting: true });
     router.push('/editor');
   }
 
