@@ -12,7 +12,11 @@ import type {
 } from './types';
 
 // Adresse des Backends. Auf dem Handy: IP des PCs im WLAN, z. B. http://192.168.178.20:8000
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000').replace(/\/$/, '');
+// Die gebaute Web-App (Desktop-Start) wird vom Backend selbst ausgeliefert → gleiche Adresse.
+const SAME_ORIGIN = Platform.OS === 'web' && !__DEV__;
+export const API_URL = (
+  process.env.EXPO_PUBLIC_API_URL ?? (SAME_ORIGIN ? '' : 'http://localhost:8000')
+).replace(/\/$/, '');
 
 export class ApiError extends Error {
   constructor(

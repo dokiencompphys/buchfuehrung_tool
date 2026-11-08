@@ -12,6 +12,9 @@ class Settings:
     data_dir: Path
     default_ocr_engine: str
     cors_origins: tuple[str, ...]
+    # Fertig gebaute Web-App (`npm run build:web` → app/dist). Ist sie gesetzt, liefert das
+    # Backend sie unter „/“ aus – dann reicht ein einziger Prozess (Desktop-Start).
+    web_dir: Path | None = None
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -21,4 +24,5 @@ class Settings:
             cors_origins=tuple(
                 o.strip() for o in os.environ.get("BUCH_CORS_ORIGINS", "*").split(",") if o.strip()
             ),
+            web_dir=Path(web).resolve() if (web := os.environ.get("BUCH_WEB_DIR")) else None,
         )

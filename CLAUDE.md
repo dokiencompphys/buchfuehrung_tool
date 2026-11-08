@@ -14,6 +14,7 @@ Monats-Buchführung für einen älteren Nutzer: große Schrift, große Tippfläc
   - `analytics/` – `compute_metrics(ledgers, today)`
   - `api/app.py` – dünne HTTP-Schicht, `create_app(settings, today=…)`
 - `app/src/app/` – Bildschirme (Expo Router); alles andere außerhalb von `src/app/`.
+- `desktop/windows/` – Start per Doppelklick: `install.ps1` baut die App (`npm run build:web` → `app/dist`) und legt die Verknüpfung an; `Buchfuehrung.ps1` startet das Backend mit `BUCH_WEB_DIR` und öffnet ein Edge-App-Fenster. Nach App-Änderungen `install.ps1` erneut ausführen.
 - Die App hat eigene Hinweise in `app/AGENTS.md` (Expo-Doku der passenden SDK-Version lesen, Pakete mit `npx expo install`).
 
 ## Regeln

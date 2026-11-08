@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from datetime import date
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
@@ -207,7 +208,29 @@ def create_app(
     def analytics(store: ArchiveDep, year: int | None = None) -> Metrics:
         return compute_metrics(store.all(), today=today(), year=year)
 
+    # Zuletzt, damit /api/... immer Vorrang hat
+    if settings.web_dir is not None:
+        _serve_web_app(app, settings.web_dir)
+
     return app
+
+
+def _serve_web_app(app: FastAPI, web_dir: Path) -> None:
+    """Liefert die gebaute Web-App aus. Unbekannte Pfade (z. B. /editor) bekommen
+    index.html, weil die App ihre Bildschirme selbst auswählt."""
+    root = web_dir.resolve()
+    index = root / "index.html"
+    if not index.is_file():
+        raise RuntimeError(f"Keine gebaute App in {root} – zuerst `npm run build:web`")
+
+    @app.get("/{path:path}", include_in_schema=False)
+    def web_app(path: str) -> FileResponse:
+        if path == "api" or path.startswith("api/"):
+            raise HTTPException(404, "Nicht gefunden")
+        file = (root / path).resolve()
+        if file.is_file() and file.is_relative_to(root):
+            return FileResponse(file)
+        return FileResponse(index)
 
 
 def _with_carry_over(store: Archive, ledger: LedgerMonth) -> LedgerMonth:

@@ -181,3 +181,28 @@ def test_old_records_with_note_field_still_load(client):
     del ledger["entries"][0]["reason"]
     saved = client.put("/api/months/2026/3", json=ledger).json()
     assert saved["ledger"]["entries"][0]["reason"] == "alter Name"
+
+
+@pytest.fixture
+def desktop_client(tmp_path):
+    web = tmp_path / "web"
+    (web / "_expo" / "static").mkdir(parents=True)
+    (web / "index.html").write_text("<html>App</html>", encoding="utf-8")
+    (web / "_expo" / "static" / "app.js").write_text("console.log(1)", encoding="utf-8")
+    (tmp_path / "geheim.txt").write_text("nicht ausliefern", encoding="utf-8")
+    settings = Settings(
+        data_dir=tmp_path / "data", default_ocr_engine="fake", cors_origins=("*",), web_dir=web
+    )
+    return TestClient(create_app(settings))
+
+
+def test_backend_serves_built_app_for_desktop_start(desktop_client):
+    assert desktop_client.get("/").text == "<html>App</html>"
+    # Bildschirme der App (z. B. nach Neuladen) bekommen ebenfalls die App
+    assert desktop_client.get("/editor").text == "<html>App</html>"
+    assert desktop_client.get("/_expo/static/app.js").text == "console.log(1)"
+    # Die Schnittstelle bleibt erreichbar, unbekannte API-Pfade sind kein index.html
+    assert desktop_client.get("/api/health").json() == {"status": "ok"}
+    assert desktop_client.get("/api/gibtsnicht").status_code == 404
+    # Nichts außerhalb des App-Ordners
+    assert "nicht ausliefern" not in desktop_client.get("/..%2Fgeheim.txt").text

@@ -9,7 +9,17 @@ docs/adr/  Architektur-Entscheidungen
 GLOSSARY.md  Fachbegriffe
 ```
 
-## Starten
+## Starten per Doppelklick (Windows)
+
+Einmalig einrichten (und nach jedem Update erneut):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File desktop\windows\install.ps1
+```
+
+Das installiert die Pakete, baut die App und legt das Symbol **Buchführung** auf dem Desktop und im Startmenü an. Ein Doppelklick startet das Backend unsichtbar und öffnet die App in einem eigenen Fenster (Microsoft Edge im App-Modus, Port 8765). Wird das Fenster geschlossen, beendet sich auch das Backend. Die Ablage liegt wie sonst in `backend/data`; Protokolle in `%LOCALAPPDATA%\Buchfuehrung`.
+
+## Starten für die Entwicklung
 
 Voraussetzungen: [uv](https://docs.astral.sh/uv/) und Node.js.
 
