@@ -17,7 +17,7 @@ Voraussetzungen: [uv](https://docs.astral.sh/uv/) und Node.js.
 
 ```bash
 cd backend
-uv sync
+uv sync --extra paddle   # ohne --extra wird PaddleOCR wieder entfernt
 uv run uvicorn buchfuehrung.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -44,6 +44,8 @@ cd backend
 uv sync --extra surya     # Surya OCR
 uv sync --extra paddle    # PaddleOCR
 ```
+
+PaddleOCR (~800 MB Python-Pakete) lädt beim ersten Foto rund 180 MB Modelle nach `~/.paddlex` und braucht auf der CPU etwa 10–15 s pro Foto. `uv sync` ohne `--extra` deinstalliert ein Modell wieder.
 
 Die Engine wählt man in der App unter ⚙ Einstellungen oder per `BUCH_OCR_ENGINE=surya|paddle|fake|auto`. Ein neues Modell = ein Adapter in `backend/src/buchfuehrung/ocr/engines/` plus ein Eintrag in `ocr/registry.py` (siehe ADR 0001).
 

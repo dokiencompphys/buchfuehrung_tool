@@ -7,6 +7,7 @@ und 2.x (`ocr`).
 from __future__ import annotations
 
 import io
+import os
 from functools import cached_property
 from typing import Any
 
@@ -21,12 +22,16 @@ class PaddleEngine:
 
     @cached_property
     def _ocr(self) -> Any:
+        # Modelle liegen nach dem ersten Download lokal; die Online-Prüfung bremst nur den Start.
+        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
         try:
             from paddleocr import PaddleOCR
         except ImportError as exc:
             raise EngineUnavailable("paddleocr ist nicht installiert") from exc
         try:
-            return PaddleOCR(lang=self._lang, use_textline_orientation=True)
+            # enable_mkldnn=False: Mit PaddlePaddle 3.3 bricht die oneDNN-Beschleunigung auf der
+            # CPU mit „ConvertPirAttribute2RuntimeAttribute not support“ ab.
+            return PaddleOCR(lang=self._lang, use_textline_orientation=True, enable_mkldnn=False)
         except TypeError:  # 2.x
             return PaddleOCR(lang=self._lang, use_angle_cls=True, show_log=False)
 

@@ -72,19 +72,20 @@ export const api = {
 
   months: () => request<ArchiveItem[]>('/api/months'),
   month: (year: number, month: number) => request<LedgerMonth>(`/api/months/${year}/${month}`),
-  saveMonth: (ledger: LedgerMonth) =>
+  /** Ein vorhandener Monat wird nur mit `replace` ersetzt, sonst ApiError 409. */
+  saveMonth: (ledger: LedgerMonth, { replace = false } = {}) =>
     request<{ ledger: LedgerMonth; created: boolean }>(
-      `/api/months/${ledger.year}/${ledger.month}`,
+      `/api/months/${ledger.year}/${ledger.month}${replace ? '?replace=true' : ''}`,
       json('PUT', ledger),
     ),
   deleteMonth: (year: number, month: number) =>
     request<void>(`/api/months/${year}/${month}`, { method: 'DELETE' }),
-  exists: async (year: number, month: number) => {
+  /** Der abgelegte Monat oder null, wenn es für Monat/Jahr noch keinen gibt. */
+  stored: async (year: number, month: number): Promise<LedgerMonth | null> => {
     try {
-      await api.month(year, month);
-      return true;
+      return await api.month(year, month);
     } catch (e) {
-      if (e instanceof ApiError && e.status === 404) return false;
+      if (e instanceof ApiError && e.status === 404) return null;
       throw e;
     }
   },

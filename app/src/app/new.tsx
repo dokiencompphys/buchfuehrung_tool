@@ -6,6 +6,7 @@ import { Platform, View } from 'react-native';
 import { ApiError, api, type PickedPhoto } from '@/api/client';
 import { useDraft } from '@/draft/DraftProvider';
 import { inform } from '@/lib/confirm';
+import { pickPhotoWeb } from '@/lib/pickPhotoWeb';
 import { useSettings } from '@/settings/SettingsProvider';
 import { Body, Button, Loading, Notice, Screen, Tile } from '@/ui/components';
 import { space } from '@/ui/theme';
@@ -30,19 +31,8 @@ export default function NewMonth() {
       const perm = await ImagePicker.requestCameraPermissionsAsync();
       if (!perm.granted) return inform(t.newMonth.camera, t.newMonth.cameraDenied);
     }
-    const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.9 };
-    const result =
-      source === 'camera'
-        ? await ImagePicker.launchCameraAsync(options)
-        : await ImagePicker.launchImageLibraryAsync(options);
-    if (result.canceled || !result.assets?.[0]) return;
-    const asset = result.assets[0];
-    const photo: PickedPhoto = {
-      uri: asset.uri,
-      name: asset.fileName ?? 'seite.jpg',
-      mimeType: asset.mimeType ?? 'image/jpeg',
-      webFile: asset.file,
-    };
+    const photo = Platform.OS === 'web' ? await pickPhotoWeb() : await pickPhotoNative(source);
+    if (!photo) return;
     await run(t.newMonth.reading, async () => {
       const reading = await api.photoDraft(photo, settings.region, settings.engine ?? undefined);
       setDraft({
@@ -86,4 +76,20 @@ export default function NewMonth() {
       <Button label={t.common.back} variant="secondary" onPress={() => router.back()} />
     </Screen>
   );
+}
+
+/** Galerie oder Kamera auf dem Handy. Das Format (z. B. HEIC vom iPhone) wandelt das Backend um. */
+async function pickPhotoNative(source: 'library' | 'camera'): Promise<PickedPhoto | null> {
+  const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.9 };
+  const result =
+    source === 'camera'
+      ? await ImagePicker.launchCameraAsync(options)
+      : await ImagePicker.launchImageLibraryAsync(options);
+  const asset = result.canceled ? undefined : result.assets?.[0];
+  if (!asset) return null;
+  return {
+    uri: asset.uri,
+    name: asset.fileName ?? 'seite.jpg',
+    mimeType: asset.mimeType ?? 'image/jpeg',
+  };
 }

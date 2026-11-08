@@ -1,9 +1,11 @@
 """Ende-zu-Ende über HTTP: so, wie die App das Backend benutzt."""
 
+import io
 from datetime import date
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from buchfuehrung.api.app import create_app
 from buchfuehrung.config import Settings
@@ -37,8 +39,16 @@ def test_manual_month_flow(client):
     }
     assert saved.json()["ledger"]["entries"][1]["reason"] == "Einkauf"
 
+    # Ein zweites Mal speichern (z. B. zweites Foto vom November) ersetzt nicht still …
     again = client.put("/api/months/2026/11", json=ledger)
-    assert again.json()["created"] is False
+    assert again.status_code == 409
+    assert (again.json()["year"], again.json()["month"]) == (2026, 11)
+    # … sondern erst, wenn der Nutzer „ersetzen“ bestätigt hat
+    ledger["entries"][1]["income"] = "260.00"
+    replaced = client.put("/api/months/2026/11", params={"replace": True}, json=ledger)
+    assert replaced.status_code == 200
+    assert replaced.json()["created"] is False
+    assert client.get("/api/months/2026/11").json()["totals"]["income"] == "260.00"
 
     archive = client.get("/api/months").json()
     assert [(i["year"], i["month"]) for i in archive] == [(2026, 11)]
@@ -48,14 +58,20 @@ def test_manual_month_flow(client):
     assert 'filename="buchfuehrung_2026-11.xlsx"' in export.headers["content-disposition"]
 
     metrics = client.get("/api/analytics").json()
-    assert metrics["income_ytd"] == "250.00"
+    assert metrics["income_ytd"] == "260.00"
+
+
+def image_bytes(fmt, size=(400, 300)):
+    buf = io.BytesIO()
+    Image.new("RGB", size, "white").save(buf, format=fmt)
+    return buf.getvalue()
 
 
 def test_photo_flow_with_demo_engine(client):
     response = client.post(
         "/api/drafts/photo",
         data={"region": "BE"},
-        files={"photo": ("seite.jpg", b"\xff\xd8fake", "image/jpeg")},
+        files={"photo": ("seite.png", image_bytes("PNG"), "image/png")},
     )
     assert response.status_code == 200
     body = response.json()
@@ -65,7 +81,31 @@ def test_photo_flow_with_demo_engine(client):
     assert entries[1]["reason"] == "Brot"
     assert entries[3]["expense"] is None  # Saldo-Spalte vom Foto nicht als Ausgabe gelesen
     photo_id = body["ledger"]["photo_id"]
-    assert client.get(f"/api/photos/{photo_id}").content == b"\xff\xd8fake"
+    stored = Image.open(io.BytesIO(client.get(f"/api/photos/{photo_id}").content))
+    assert (stored.format, stored.size) == ("JPEG", (400, 300))
+
+
+def test_iphone_heic_photo_is_accepted_and_stored_as_jpeg(client):
+    response = client.post(
+        "/api/drafts/photo",
+        data={"region": "BE"},
+        files={"photo": ("IMG_0042.HEIC", image_bytes("HEIF"), "image/heic")},
+    )
+    assert response.status_code == 200
+    photo_id = response.json()["ledger"]["photo_id"]
+    assert photo_id.endswith(".jpg")
+    stored = Image.open(io.BytesIO(client.get(f"/api/photos/{photo_id}").content))
+    assert stored.format == "JPEG"
+
+
+def test_non_image_upload_is_rejected(client):
+    response = client.post(
+        "/api/drafts/photo",
+        data={"region": "BE"},
+        files={"photo": ("liste.pdf", b"%PDF-1.7 nicht ein Bild", "application/pdf")},
+    )
+    assert response.status_code == 415
+    assert "Bildformat" in response.json()["detail"]
 
 
 def test_missing_ocr_model_is_reported(client):
@@ -100,11 +140,15 @@ def blank(client, year, month):
     ).json()
 
 
-def save(client, ledger, income=None, opening=None):
+def save(client, ledger, income=None, opening=None, replace=False):
     if income is not None:
         ledger["entries"][1]["income"] = income
     ledger["opening_balance"] = opening
-    return client.put(f"/api/months/{ledger['year']}/{ledger['month']}", json=ledger).json()
+    return client.put(
+        f"/api/months/{ledger['year']}/{ledger['month']}",
+        params={"replace": replace},
+        json=ledger,
+    ).json()
 
 
 def test_balance_carries_over_and_updates_when_earlier_month_changes(client):
@@ -123,7 +167,7 @@ def test_balance_carries_over_and_updates_when_earlier_month_changes(client):
 
     # Oktober nachträglich korrigiert → November und aktueller Saldo ziehen mit
     october = client.get("/api/months/2026/10").json()
-    save(client, october, income="300.00", opening="1000.00")
+    save(client, october, income="300.00", opening="1000.00", replace=True)
     assert client.get("/api/months/2026/11").json()["totals"]["opening"] == "1300.00"
     assert client.get("/api/balance").json() == {"amount": "1350.00", "year": 2026, "month": 11}
     items = client.get("/api/months").json()

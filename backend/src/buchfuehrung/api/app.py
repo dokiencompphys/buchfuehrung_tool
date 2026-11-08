@@ -2,7 +2,6 @@
 
 from collections.abc import Callable
 from datetime import date
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
@@ -25,7 +24,8 @@ from buchfuehrung.ocr.registry import (
     get_engine,
     resolve_engine_id,
 )
-from buchfuehrung.storage.archive import Archive, ArchiveItem
+from buchfuehrung.photos import UnreadablePhoto, prepare_photo
+from buchfuehrung.storage.archive import AlreadyStored, Archive, ArchiveItem
 
 MAX_PHOTO_BYTES = 25 * 1024 * 1024
 
@@ -72,6 +72,16 @@ def create_app(
         from fastapi.responses import JSONResponse
 
         return JSONResponse(status_code=422, content={"detail": str(exc)})
+
+    @app.exception_handler(AlreadyStored)
+    async def _already_stored(_, exc: AlreadyStored):  # type: ignore[no-untyped-def]
+        from fastapi.responses import JSONResponse
+
+        # 409: Die App fragt nach und sendet dann mit ?replace=true erneut
+        return JSONResponse(
+            status_code=409,
+            content={"detail": str(exc), "year": exc.year, "month": exc.month},
+        )
 
     # --- Stammdaten -----------------------------------------------------------------
 
@@ -125,8 +135,14 @@ def create_app(
             ocr = get_engine(engine or settings.default_ocr_engine)
         except EngineUnavailable as exc:
             raise HTTPException(503, str(exc)) from exc
-        reading = read_photo(content, ocr, region, fallback=today())
-        photo_id = store.store_photo(content, Path(photo.filename or "").suffix)
+        try:
+            image = prepare_photo(content)  # z. B. iPhone-HEIC → aufrechtes JPEG
+        except UnreadablePhoto as exc:
+            raise HTTPException(
+                415, "Bildformat nicht erkannt. Bitte ein Foto (JPG, PNG oder HEIC) wählen."
+            ) from exc
+        reading = read_photo(image, ocr, region, fallback=today())
+        photo_id = store.store_photo(image, ".jpg")
         ledger = _with_carry_over(store, reading.ledger)
         return reading.model_copy(
             update={"ledger": ledger.model_copy(update={"photo_id": photo_id})}
@@ -143,10 +159,13 @@ def create_app(
         return _require(store, year, month)
 
     @app.put("/api/months/{year}/{month}")
-    def save_month(year: int, month: int, ledger: LedgerMonth, store: ArchiveDep) -> SaveResponse:
+    def save_month(
+        year: int, month: int, ledger: LedgerMonth, store: ArchiveDep, replace: bool = False
+    ) -> SaveResponse:
+        """Legt einen Monat ab. Einen vorhandenen ersetzt nur `?replace=true`, sonst 409."""
         if (ledger.year, ledger.month) != (year, month):
             raise HTTPException(422, "Monat/Jahr in Adresse und Daten stimmen nicht überein")
-        saved, created = store.save(ledger)
+        saved, created = store.save(ledger, replace=replace)
         return SaveResponse(ledger=saved, created=created)
 
     @app.delete("/api/months/{year}/{month}", status_code=204)

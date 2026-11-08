@@ -1,6 +1,7 @@
 """Ablage: alle erstellten Buchungsmonate (SQLite) und die Originalfotos (Dateien).
 
-Pro Monat/Jahr gibt es genau einen Buchungsmonat; erneutes Speichern ersetzt ihn.
+Pro Monat/Jahr gibt es genau einen Buchungsmonat. Ersetzen muss man ausdrücklich verlangen,
+damit ein zweites Foto desselben Monats nicht still die bisherige Buchführung überschreibt.
 """
 
 from __future__ import annotations
@@ -29,6 +30,15 @@ CREATE TABLE IF NOT EXISTS ledger_months (
 """
 
 
+class AlreadyStored(Exception):
+    """Für diesen Monat liegt schon eine Buchführung in der Ablage."""
+
+    def __init__(self, year: int, month: int) -> None:
+        super().__init__(f"{month:02d}/{year} ist bereits abgelegt")
+        self.year = year
+        self.month = month
+
+
 class ArchiveItem(BaseModel):
     year: int
     month: int
@@ -52,13 +62,19 @@ class Archive:
 
     # --- Buchungsmonate -------------------------------------------------------------
 
-    def save(self, ledger: LedgerMonth) -> tuple[LedgerMonth, bool]:
-        """Speichert (oder ersetzt) einen Monat. Gibt zurück, ob er neu war."""
+    def save(self, ledger: LedgerMonth, *, replace: bool = False) -> tuple[LedgerMonth, bool]:
+        """Speichert einen Monat. Gibt zurück, ob er neu war.
+
+        Liegt der Monat schon in der Ablage, wird er nur mit `replace=True` ersetzt,
+        sonst kommt `AlreadyStored`.
+        """
         now = _now()
         # Übertrag und Summen werden immer frisch berechnet, nie gespeichert
         data = ledger.model_dump_json(exclude={"carry_over", "totals"})
         with self._connect() as db:
             existed = self._exists(db, ledger.year, ledger.month)
+            if existed and not replace:
+                raise AlreadyStored(ledger.year, ledger.month)
             db.execute(
                 """
                 INSERT INTO ledger_months (year, month, data, created_at, updated_at)

@@ -8,6 +8,7 @@ import { useDraft } from '@/draft/DraftProvider';
 import { confirm } from '@/lib/confirm';
 import { downloadFile } from '@/lib/download';
 import { formatCents, formatEuro, parseInput, runningBalances, sumCents, toCents, toInput } from '@/lib/money';
+import { useAsync } from '@/lib/useAsync';
 import { useSettings } from '@/settings/SettingsProvider';
 import { Body, Button, Card, Notice, Screen, Select, Title } from '@/ui/components';
 import { colors, font, space, touch } from '@/ui/theme';
@@ -51,6 +52,16 @@ export default function Editor() {
     lastRegion.current = settings.region;
     api.refreshDraft({ ...ledger, region: settings.region }).then(setLedger).catch(() => {});
   }, [settings.region, ledger]);
+
+  // Liegt für den gewählten Monat schon eine (andere) Buchführung in der Ablage?
+  // Der gerade geöffnete, abgelegte Monat selbst zählt nicht.
+  const ownPeriod = draft?.editingExisting ? { year: draft.ledger.year, month: draft.ledger.month } : null;
+  const isOwn = (y: number, m: number) => ownPeriod?.year === y && ownPeriod?.month === m;
+  const period = ledger ? { year: ledger.year, month: ledger.month } : null;
+  const existing = useAsync(
+    () => (period && !isOwn(period.year, period.month) ? api.stored(period.year, period.month) : Promise.resolve(null)),
+    [period?.year, period?.month, ownPeriod?.year, ownPeriod?.month],
+  );
 
   const parsed = useMemo(() => {
     const result: Record<string, { income: string | null | undefined; expense: string | null | undefined }> = {};
@@ -123,11 +134,21 @@ export default function Editor() {
     const next: LedgerMonth = { ...ledger, entries, opening_balance };
     setSaving(true);
     try {
-      if (!draft?.editingExisting && (await api.exists(next.year, next.month))) {
-        const ok = await confirm(t.editor.create, t.editor.overwrite, t.editor.overwriteYes, t.common.cancel);
+      let res;
+      try {
+        res = await api.saveMonth(next, { replace: isOwn(next.year, next.month) });
+      } catch (e) {
+        // 409: Für den Monat liegt schon eine andere Buchführung in der Ablage
+        if (!(e instanceof ApiError && e.status === 409)) throw e;
+        const ok = await confirm(
+          t.editor.overwriteTitle,
+          fmt(t.editor.overwrite, { month: monthName(next.year, next.month) }),
+          t.editor.overwriteYes,
+          t.common.cancel,
+        );
         if (!ok) return;
+        res = await api.saveMonth(next, { replace: true });
       }
-      const res = await api.saveMonth(next);
       applyLedger(res.ledger);
       setSaved(res.ledger);
       setDraft({ ledger: res.ledger, hints: [], recognizedDays: null, editingExisting: true });
@@ -159,6 +180,22 @@ export default function Editor() {
           onChange={(y) => changePeriod(y, ledger.month)}
         />
       </View>
+
+      {existing.data?.totals && !saved ? (
+        <Notice>
+          <Body style={{ fontWeight: '700' }}>
+            {fmt(t.editor.existsTitle, { month: monthName(existing.data.year, existing.data.month) })}
+          </Body>
+          <Body>
+            {fmt(t.editor.existsBody, {
+              income: formatEuro(existing.data.totals.income),
+              expense: formatEuro(existing.data.totals.expense),
+              closing: formatEuro(existing.data.totals.closing),
+            })}
+          </Body>
+          <Body>{t.editor.existsHint}</Body>
+        </Notice>
+      ) : null}
 
       {/* Anfangssaldo */}
       <Card>

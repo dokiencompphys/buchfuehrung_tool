@@ -8,8 +8,9 @@ Monats-Buchführung für einen älteren Nutzer: große Schrift, große Tippfläc
   - `domain/` – `LedgerMonth`, `DayEntry`; `factory.blank_month()` erzeugt Monate mit Ruhetagen
   - `calendars/` – `closed_days(year, month, region)`, `regions()`
   - `ocr/` – `reader.read_photo(image, engine, region, fallback)`; Engines hinter `engine.OcrEngine` (Seam mit Surya, Paddle, Fake)
+  - `photos.py` – `prepare_photo(raw)`: jedes Upload (auch iPhone-HEIC) → aufrechtes RGB-JPEG, vor OCR und Ablage
   - `export/` – `export_ledger(ledger, fmt, lang)`
-  - `storage/` – `Archive` (SQLite + Fotos)
+  - `storage/` – `Archive` (SQLite + Fotos); `save(…, replace=False)` ersetzt einen vorhandenen Monat nur ausdrücklich
   - `analytics/` – `compute_metrics(ledgers, today)`
   - `api/app.py` – dünne HTTP-Schicht, `create_app(settings, today=…)`
 - `app/src/app/` – Bildschirme (Expo Router); alles andere außerhalb von `src/app/`.
